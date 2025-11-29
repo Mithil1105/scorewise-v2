@@ -57,13 +57,13 @@ export function InstitutionBranding({ institution, onUpdate }: InstitutionBrandi
       const filePath = `institution-logos/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('task1_images')
+        .from('institution_logos')
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage
-        .from('task1_images')
+        .from('institution_logos')
         .getPublicUrl(filePath);
 
       setLogoUrl(urlData.publicUrl);

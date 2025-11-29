@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { InstitutionProvider } from "@/contexts/InstitutionContext";
+import ProtectedRoute from "@/components/routing/ProtectedRoute";
+import DashboardRedirect from "@/components/routing/DashboardRedirect";
 import Index from "./pages/Index";
 import Essay from "./pages/Essay";
 import Typing from "./pages/Typing";
@@ -57,23 +59,93 @@ const App = () => (
               <Route path="/profile" element={<Profile />} />
               <Route path="/access-denied" element={<AccessDenied />} />
               <Route path="/review/:token" element={<ReviewEssay />} />
-              {/* Institution Routes */}
-              <Route path="/institution/admin" element={<InstitutionAdmin />} />
-              <Route path="/institution/student" element={<StudentDashboard />} />
-              <Route path="/institution/teacher" element={<TeacherDashboard />} />
-              <Route path="/institution/review-essay/:essayId" element={<ReviewAssignmentEssay />} />
-              <Route path="/institution/assignments/group/:groupId" element={<CombinedAssignment />} />
-              {/* Admin Routes */}
-              <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/admin/gre-topics" element={<GRETopics />} />
-              <Route path="/admin/ielts-task1" element={<IELTSTask1Admin />} />
-              <Route path="/admin/ielts-task2" element={<IELTSTask2Admin />} />
-              <Route path="/admin/essay-analytics" element={<EssayAnalytics />} />
-              <Route path="/admin/vocabulary" element={<VocabularyManager />} />
-              <Route path="/admin/users" element={<UserManager />} />
-              <Route path="/admin/ai-controls" element={<AIControls />} />
-              <Route path="/admin/feedback" element={<FeedbackManager />} />
-              <Route path="/admin/institutions" element={<InstitutionsManager />} />
+              
+              {/* Dashboard Redirect - automatically routes users to their appropriate dashboard */}
+              <Route path="/dashboard" element={
+                <ProtectedRoute>
+                  <DashboardRedirect />
+                </ProtectedRoute>
+              } />
+              
+              {/* Institution Routes - Protected */}
+              <Route path="/institution/admin" element={
+                <ProtectedRoute>
+                  <InstitutionAdmin />
+                </ProtectedRoute>
+              } />
+              <Route path="/institution/student" element={
+                <ProtectedRoute>
+                  <StudentDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/institution/teacher" element={
+                <ProtectedRoute>
+                  <TeacherDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/institution/review-essay/:essayId" element={
+                <ProtectedRoute>
+                  <ReviewAssignmentEssay />
+                </ProtectedRoute>
+              } />
+              <Route path="/institution/assignments/group/:groupId" element={
+                <ProtectedRoute>
+                  <CombinedAssignment />
+                </ProtectedRoute>
+              } />
+              
+              {/* Admin Routes - Protected */}
+              <Route path="/admin" element={
+                <ProtectedRoute>
+                  <AdminDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/gre-topics" element={
+                <ProtectedRoute>
+                  <GRETopics />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/ielts-task1" element={
+                <ProtectedRoute>
+                  <IELTSTask1Admin />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/ielts-task2" element={
+                <ProtectedRoute>
+                  <IELTSTask2Admin />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/essay-analytics" element={
+                <ProtectedRoute>
+                  <EssayAnalytics />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/vocabulary" element={
+                <ProtectedRoute>
+                  <VocabularyManager />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/users" element={
+                <ProtectedRoute>
+                  <UserManager />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/ai-controls" element={
+                <ProtectedRoute>
+                  <AIControls />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/feedback" element={
+                <ProtectedRoute>
+                  <FeedbackManager />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/institutions" element={
+                <ProtectedRoute>
+                  <InstitutionsManager />
+                </ProtectedRoute>
+              } />
+              
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

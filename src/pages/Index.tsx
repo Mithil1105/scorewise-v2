@@ -1,10 +1,42 @@
-import { Link } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { useInstitution } from "@/contexts/InstitutionContext";
+import { useAdmin } from "@/hooks/useAdmin";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { TopBar } from "@/components/layout/TopBar";
 import { Button } from "@/components/ui/button";
 import { PenLine, Keyboard, BookOpen, Timer, Zap, FileDown, Monitor, GraduationCap } from "lucide-react";
 
 const Index = () => {
+  const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+  const { activeMembership, loading: instLoading } = useInstitution();
+  const { isAdmin, loading: adminLoading } = useAdmin();
+
+  useEffect(() => {
+    // Wait for all loading states to complete
+    if (authLoading || instLoading || adminLoading) {
+      return;
+    }
+
+    // If user is authenticated and has a dashboard (admin or institution member), redirect to dashboard
+    if (user) {
+      // Master Admin
+      if (isAdmin) {
+        navigate("/dashboard");
+        return;
+      }
+      
+      // Institution member with active membership
+      if (activeMembership && activeMembership.status === 'active') {
+        navigate("/dashboard");
+        return;
+      }
+      
+      // General student (no institution) - stay on home page, no redirect
+    }
+  }, [user, isAdmin, activeMembership, authLoading, instLoading, adminLoading, navigate]);
   const features = [
     {
       icon: Timer,

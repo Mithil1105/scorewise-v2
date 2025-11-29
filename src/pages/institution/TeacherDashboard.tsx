@@ -13,7 +13,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { 
   BookOpen, Building2, Users, FileText, 
-  ClipboardList, Loader2, GraduationCap, FolderOpen
+  ClipboardList, Loader2, GraduationCap, FolderOpen,
+  TrendingUp, CheckCircle2, Clock, AlertCircle, Sparkles, ArrowRight
 } from 'lucide-react';
 import { AssignmentManager } from '@/components/institution/AssignmentManager';
 import { BatchManager } from '@/components/institution/BatchManager';
@@ -28,13 +29,31 @@ interface Student {
     avatar_url: string | null;
   };
   essayCount?: number;
+  avgScore?: number;
+}
+
+interface DashboardStats {
+  totalStudents: number;
+  totalEssays: number;
+  totalAssignments: number;
+  pendingReviews: number;
+  avgScore: number;
+  activeStudents: number;
 }
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const { activeMembership, activeInstitution, loading: institutionLoading } = useInstitution();
   const [students, setStudents] = useState<Student[]>([]);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalStudents: 0,
+    totalEssays: 0,
+    totalAssignments: 0,
+    pendingReviews: 0,
+    avgScore: 0,
+    activeStudents: 0,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,13 +75,13 @@ export default function TeacherDashboard() {
       return;
     }
 
-    // If we have valid access, fetch students
+    // If we have valid access, fetch data
     if (activeMembership && ['teacher', 'inst_admin'].includes(activeMembership.role) && activeMembership.status === 'active') {
-    fetchStudents();
+      fetchDashboardData();
     }
   }, [user, activeMembership, authLoading, institutionLoading, navigate]);
 
-  const fetchStudents = async () => {
+  const fetchDashboardData = async () => {
     if (!activeInstitution) return;
     
     setLoading(true);
@@ -84,28 +103,72 @@ export default function TeacherDashboard() {
         .select('user_id, display_name, avatar_url')
         .in('user_id', userIds);
 
-      // Fetch essay counts
-      const { data: essayCounts } = await supabase
+      // Fetch essays with scores
+      const { data: essays } = await supabase
         .from('essays')
-        .select('user_id')
+        .select('user_id, ai_score, created_at')
         .eq('institution_id', activeInstitution.id)
         .in('user_id', userIds);
 
+      // Fetch assignments
+      const { data: assignments } = await supabase
+        .from('assignments')
+        .select('id, status')
+        .eq('institution_id', activeInstitution.id);
+
+      // Fetch pending submissions
+      const { data: submissions } = await supabase
+        .from('assignment_submissions')
+        .select('id, status')
+        .eq('status', 'submitted')
+        .in('assignment_id', assignments?.map(a => a.id) || []);
+
       const profileMap = new Map(profiles?.map(p => [p.user_id, p]));
       const countMap = new Map<string, number>();
-      essayCounts?.forEach(e => {
+      const scoreMap = new Map<string, number[]>();
+      
+      essays?.forEach(e => {
         countMap.set(e.user_id, (countMap.get(e.user_id) || 0) + 1);
+        if (e.ai_score !== null) {
+          const scores = scoreMap.get(e.user_id) || [];
+          scores.push(e.ai_score);
+          scoreMap.set(e.user_id, scores);
+        }
       });
 
-      const enrichedStudents = (membersData || []).map(m => ({
-        ...m,
-        profile: profileMap.get(m.user_id),
-        essayCount: countMap.get(m.user_id) || 0
-      })) as Student[];
+      const enrichedStudents = (membersData || []).map(m => {
+        const scores = scoreMap.get(m.user_id) || [];
+        const avgScore = scores.length > 0 
+          ? scores.reduce((sum, s) => sum + s, 0) / scores.length 
+          : 0;
+        
+        return {
+          ...m,
+          profile: profileMap.get(m.user_id),
+          essayCount: countMap.get(m.user_id) || 0,
+          avgScore: Math.round(avgScore * 10) / 10
+        };
+      }) as Student[];
 
       setStudents(enrichedStudents);
+
+      // Calculate overall stats
+      const totalEssays = essays?.length || 0;
+      const allScores = essays?.filter(e => e.ai_score !== null).map(e => e.ai_score) || [];
+      const avgScore = allScores.length > 0
+        ? allScores.reduce((sum, s) => sum + s, 0) / allScores.length
+        : 0;
+
+      setStats({
+        totalStudents: enrichedStudents.length,
+        totalEssays,
+        totalAssignments: assignments?.length || 0,
+        pendingReviews: submissions?.length || 0,
+        avgScore: Math.round(avgScore * 10) / 10,
+        activeStudents: enrichedStudents.filter(s => s.essayCount > 0).length,
+      });
     } catch (err) {
-      console.error('Error fetching students:', err);
+      console.error('Error fetching dashboard data:', err);
     } finally {
       setLoading(false);
     }
@@ -149,65 +212,184 @@ export default function TeacherDashboard() {
     <PageLayout>
       <TopBar />
       <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <BookOpen className="h-8 w-8 text-primary" />
+        {/* Welcome Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-3xl font-bold">Teacher Dashboard</h1>
+              <h1 className="text-3xl font-bold mb-2">
+                Welcome back, {profile?.display_name || 'Teacher'}! 👋
+              </h1>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Building2 className="h-4 w-4" />
                 <span>{activeInstitution.name}</span>
+                <Badge variant="secondary" className="ml-2 capitalize">
+                  {activeMembership.role === 'inst_admin' ? 'Institution Admin' : 'Teacher'}
+                </Badge>
               </div>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <Badge variant="secondary" className="capitalize">
-              {activeMembership.role}
-            </Badge>
             {activeMembership.role === 'inst_admin' && (
               <Button variant="outline" onClick={() => navigate('/institution/admin')}>
+                <Sparkles className="h-4 w-4 mr-2" />
                 Admin Panel
               </Button>
             )}
           </div>
+          <p className="text-muted-foreground max-w-2xl">
+            Manage your students, create assignments, and track their progress. Everything you need is right here.
+          </p>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>My Students</CardDescription>
+        {/* Comprehensive Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardDescription className="text-sm font-medium">Total Students</CardDescription>
+                <Users className="h-5 w-5 text-primary" />
+              </div>
             </CardHeader>
-            <CardContent className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-primary" />
-              <span className="text-2xl font-bold">{students.length}</span>
+            <CardContent>
+              <div className="text-3xl font-bold mb-1">{stats.totalStudents}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.activeStudents} active this month
+              </p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Total Essays</CardDescription>
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardDescription className="text-sm font-medium">Total Essays</CardDescription>
+                <FileText className="h-5 w-5 text-primary" />
+              </div>
             </CardHeader>
-            <CardContent className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              <span className="text-2xl font-bold">
-                {students.reduce((sum, s) => sum + (s.essayCount || 0), 0)}
-              </span>
+            <CardContent>
+              <div className="text-3xl font-bold mb-1">{stats.totalEssays}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.totalEssays > 0 ? `${Math.round((stats.totalEssays / stats.totalStudents) * 10) / 10} per student` : 'No essays yet'}
+              </p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Assignments Created</CardDescription>
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardDescription className="text-sm font-medium">Average Score</CardDescription>
+                <TrendingUp className="h-5 w-5 text-primary" />
+              </div>
             </CardHeader>
-            <CardContent className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-primary" />
-              <span className="text-2xl font-bold">0</span>
-              <span className="text-sm text-muted-foreground">(coming soon)</span>
+            <CardContent>
+              <div className="text-3xl font-bold mb-1">
+                {stats.avgScore > 0 ? stats.avgScore.toFixed(1) : '—'}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {stats.avgScore > 0 ? 'Across all essays' : 'No scored essays yet'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardDescription className="text-sm font-medium">Assignments</CardDescription>
+                <ClipboardList className="h-5 w-5 text-primary" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold mb-1">{stats.totalAssignments}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.totalAssignments > 0 ? 'Active assignments' : 'Create your first assignment'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardDescription className="text-sm font-medium">Pending Reviews</CardDescription>
+                <Clock className="h-5 w-5 text-amber-500" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold mb-1">{stats.pendingReviews}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.pendingReviews > 0 ? 'Awaiting your review' : 'All caught up!'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardDescription className="text-sm font-medium">Active Students</CardDescription>
+                <CheckCircle2 className="h-5 w-5 text-green-500" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold mb-1">{stats.activeStudents}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.activeStudents > 0 ? 'Students with essays' : 'No activity yet'}
+              </p>
             </CardContent>
           </Card>
         </div>
+
+        {/* Quick Actions */}
+        <Card className="mb-8 bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+          <CardHeader>
+            <CardTitle className="text-lg">Quick Actions</CardTitle>
+            <CardDescription>Get started with common tasks</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto py-3"
+                onClick={() => {
+                  const tabs = document.querySelector('[role="tablist"]');
+                  const assignmentsTab = tabs?.querySelector('[value="assignments"]') as HTMLElement;
+                  assignmentsTab?.click();
+                }}
+              >
+                <ClipboardList className="h-4 w-4 mr-2" />
+                <div className="text-left">
+                  <div className="font-medium">Create Assignment</div>
+                  <div className="text-xs text-muted-foreground">Set up a new task</div>
+                </div>
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto py-3"
+                onClick={() => {
+                  const tabs = document.querySelector('[role="tablist"]');
+                  const studentsTab = tabs?.querySelector('[value="students"]') as HTMLElement;
+                  studentsTab?.click();
+                }}
+              >
+                <Users className="h-4 w-4 mr-2" />
+                <div className="text-left">
+                  <div className="font-medium">View Students</div>
+                  <div className="text-xs text-muted-foreground">See all enrolled students</div>
+                </div>
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto py-3"
+                onClick={() => navigate('/institution/admin')}
+                disabled={activeMembership.role !== 'inst_admin'}
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                <div className="text-left">
+                  <div className="font-medium">Manage Institution</div>
+                  <div className="text-xs text-muted-foreground">Admin settings</div>
+                </div>
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Tabs for different sections */}
         <Tabs defaultValue="assignments" className="space-y-6">
@@ -234,7 +416,9 @@ export default function TeacherDashboard() {
                   <GraduationCap className="h-5 w-5" />
                   My Students
                 </CardTitle>
-                <CardDescription>Students enrolled in your institution</CardDescription>
+                <CardDescription>
+                  View and manage all students enrolled in your institution
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -242,10 +426,26 @@ export default function TeacherDashboard() {
                     <Loader2 className="h-8 w-8 animate-spin" />
                   </div>
                 ) : students.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p>No students yet</p>
-                    <p className="text-sm">Share the institution code to invite students</p>
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Users className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No students yet</h3>
+                    <p className="text-sm mb-4">
+                      Share your institution code with students to get started
+                    </p>
+                    {activeInstitution?.code && (
+                      <div className="inline-flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
+                        <code className="font-mono font-bold">{activeInstitution.code}</code>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(activeInstitution.code);
+                          }}
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <Table>
@@ -253,8 +453,9 @@ export default function TeacherDashboard() {
                       <TableRow>
                         <TableHead>Student</TableHead>
                         <TableHead>Essays</TableHead>
+                        <TableHead>Avg Score</TableHead>
                         <TableHead>Joined</TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead>Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -273,14 +474,36 @@ export default function TeacherDashboard() {
                               </span>
                             </div>
                           </TableCell>
-                          <TableCell>{student.essayCount}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                              {student.essayCount || 0}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {student.avgScore > 0 ? (
+                              <Badge variant="secondary">
+                                {student.avgScore.toFixed(1)}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">—</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-muted-foreground">
                             {new Date(student.created_at).toLocaleDateString()}
                           </TableCell>
                           <TableCell>
-                            <Button variant="ghost" size="sm" disabled>
-                              View Essays
-                            </Button>
+                            {student.essayCount > 0 ? (
+                              <Badge variant="default" className="bg-green-500">
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">
+                                <Clock className="h-3 w-3 mr-1" />
+                                New
+                              </Badge>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
