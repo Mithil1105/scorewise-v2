@@ -703,14 +703,6 @@ export function AssignmentManager() {
                   use_predefined_topic: false,
                   selected_topic_id: '',
                   image_url: '',
-                  club_ielts_tasks: false,
-                  task1_title: '',
-                  task1_topic: '',
-                  task1_instructions: '',
-                  task1_image_url: '',
-                  task2_title: '',
-                  task2_topic: '',
-                  task2_instructions: ''
                 });
                 setSelectedDate(undefined);
                 setImageFile(null);
@@ -874,7 +866,6 @@ export function AssignmentManager() {
                   
                   {/* Topic & Details Section */}
                   <div className="space-y-4 pt-4 border-t">
-                    <div className="space-y-4 pt-4 border-t">
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -1157,15 +1148,7 @@ export function AssignmentManager() {
                       batch_id: '',
                       use_predefined_topic: false,
                       selected_topic_id: '',
-                      image_url: '',
-                      club_ielts_tasks: false,
-                      task1_title: '',
-                      task1_topic: '',
-                      task1_instructions: '',
-                      task1_image_url: '',
-                      task2_title: '',
-                      task2_topic: '',
-                      task2_instructions: ''
+                      image_url: ''
                     });
                     setSelectedDate(undefined);
                     setImageFile(null);
