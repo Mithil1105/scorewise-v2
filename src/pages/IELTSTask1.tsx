@@ -13,7 +13,7 @@ import { getRandomTask1Question, IELTSTask1Question } from "@/data/ieltsTask1";
 import { exportIELTSTask1AsDocx } from "@/utils/exportIELTS";
 import { 
   Play, Pause, RotateCcw, Shuffle, Download, Upload, 
-  FileText, Zap, ImageIcon, X, CheckCircle2, AlertCircle, Loader2, Cloud, ClipboardList
+  FileText, Zap, ImageIcon, X, CheckCircle2, AlertCircle, Loader2, Cloud, ClipboardList, ZoomIn, ZoomOut
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import AIScorePanel from "@/components/essay/AIScorePanel";
@@ -41,13 +41,6 @@ const IELTSTask1 = () => {
     assignmentMinWords?: number;
     assignmentMaxWords?: number;
     assignmentDueDate?: string;
-    isClubbed?: boolean;
-    groupId?: string;
-    sharedTimer?: {
-      timeLeft: number;
-      isRunning: boolean;
-      startTime: number | null;
-    };
   } | null;
 
   const [question, setQuestion] = useState<IELTSTask1Question | null>(null);
@@ -60,8 +53,10 @@ const IELTSTask1 = () => {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [wpm, setWpm] = useState(0);
   const [currentLocalId, setCurrentLocalId] = useState<string | null>(null);
+  const [imageZoom, setImageZoom] = useState(100);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   
   const { essays, saveEssays, addEssay, updateEssay, getEssay } = useLocalEssays();
@@ -182,52 +177,6 @@ const IELTSTask1 = () => {
 
       // If this is a clubbed assignment, navigate to Task 2
       if (assignmentData.isClubbed && assignmentData.groupId) {
-        // Fetch the group data to get Task 2
-        const { data: groupData } = await supabase
-          .from('assignment_groups')
-          .select(`
-            id,
-            name,
-            total_time_minutes,
-            assignments:assignments(
-              id,
-              title,
-              topic,
-              exam_type,
-              instructions,
-              image_url,
-              order_in_group
-            )
-          `)
-          .eq('id', assignmentData.groupId)
-          .single();
-
-        if (groupData && groupData.assignments) {
-          const sortedAssignments = (groupData.assignments as any[]).sort(
-            (a, b) => (a.order_in_group || 0) - (b.order_in_group || 0)
-          );
-          const task2 = sortedAssignments.find(a => a.exam_type === 'IELTS_T2');
-          
-          if (task2) {
-            // Navigate to Task 2 with shared timer
-            setTimeout(() => {
-              navigate('/ielts/task2', {
-                state: {
-                  isAssignment: true,
-                  assignmentId: task2.id,
-                  assignmentTitle: task2.title,
-                  assignmentTopic: task2.topic,
-                  assignmentInstructions: task2.instructions,
-                  assignmentImageUrl: task2.image_url,
-                  isClubbed: true,
-                  groupId: assignmentData.groupId,
-                  sharedTimer: assignmentData.sharedTimer
-                }
-              });
-            }, 1500); // Small delay to show the toast
-            return;
-          }
-        }
       }
     } catch (err: any) {
       console.error('Error submitting assignment:', err);
@@ -661,86 +610,25 @@ const IELTSTask1 = () => {
           </div>
         )}
 
-        {/* Question Display */}
+        {/* Instructions Bar */}
         {(question || customImage || cloudImageUrl) && (
-          <div className="mb-6 bg-card border border-border rounded-lg overflow-hidden">
-            {/* Image/Visual Preview */}
-            {cloudImageUrl ? (
-              <div className="relative bg-muted p-4">
-                <div className="absolute top-2 right-2 flex items-center gap-2">
-                  <Badge variant="secondary" className="gap-1">
-                    <Cloud className="h-3 w-3" />
-                    Assignment Image
-                  </Badge>
-                </div>
-                <img 
-                  src={cloudImageUrl} 
-                  alt="Assignment image" 
-                  className="max-h-64 mx-auto rounded-md object-contain"
-                  loading="lazy"
-                />
-              </div>
-            ) : customImage ? (
-              <div className="relative bg-muted p-4">
-                <div className="absolute top-2 right-2 flex items-center gap-2">
-                  {cloudImageUrl && (
-                    <Badge variant="secondary" className="gap-1">
-                      <Cloud className="h-3 w-3" />
-                      Cloud
-                    </Badge>
-                  )}
-                  {!assignmentData?.isAssignment && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setCustomImage(null);
-                        setCloudImageUrl(null);
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-                <img 
-                  src={customImage} 
-                  alt="Uploaded question" 
-                  className="max-h-64 mx-auto rounded-md object-contain"
-                  loading="lazy"
-                />
-              </div>
-            ) : question && (
-              <div className="bg-muted/50 p-4 border-b border-border">
-                <div className="flex items-center gap-2 mb-2">
-                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                  <Badge variant="secondary" className="text-xs capitalize">
-                    {question.type.replace('-', ' ')}
-                  </Badge>
-                </div>
-                <h3 className="font-semibold text-foreground mb-2">{question.title}</h3>
-                <p className="text-sm text-muted-foreground italic">{question.description}</p>
-              </div>
-            )}
-            
-            {/* Instructions */}
-            <div className="p-4 bg-primary/5">
-              <p className="text-sm text-foreground">
-                <span className="font-medium">Instructions: </span>
-                {question?.instructions || "Summarise the information by selecting and reporting the main features, and make comparisons where relevant."}
-              </p>
-              <p className="text-xs text-muted-foreground mt-2">
-                You should write at least 150 words.
-              </p>
-            </div>
+          <div className="mb-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
+            <p className="text-sm text-foreground">
+              <span className="font-medium">Instructions: </span>
+              {question?.instructions || "Summarise the information by selecting and reporting the main features, and make comparisons where relevant."}
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              You should write at least 150 words.
+            </p>
           </div>
         )}
 
         {/* Timer and Stats Row */}
-        <div className="flex flex-wrap items-center justify-between gap-6 mb-8 p-6 bg-card rounded-xl border border-border shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-6 mb-6 p-4 bg-card rounded-xl border border-border shadow-sm">
           <div className="flex items-center gap-6">
             {/* Circular Timer */}
             <div className="relative">
-              <svg className="w-28 h-28 md:w-32 md:h-32 -rotate-90">
+              <svg className="w-20 h-20 md:w-24 md:h-24 -rotate-90">
                 <circle
                   cx="50%"
                   cy="50%"
@@ -762,49 +650,159 @@ const IELTSTask1 = () => {
                   className="transition-all duration-1000"
                 />
               </svg>
-              <div className={`absolute inset-0 flex items-center justify-center font-mono text-2xl md:text-3xl font-bold ${isLowTime ? "text-destructive animate-pulse-soft" : "text-foreground"}`}>
+              <div className={`absolute inset-0 flex items-center justify-center font-mono text-xl md:text-2xl font-bold ${isLowTime ? "text-destructive animate-pulse-soft" : "text-foreground"}`}>
                 {formatTime(timeLeft)}
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <Button onClick={handleToggle} variant="outline" size="default" className="gap-2 text-base px-6">
-                {isRunning ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+            <div className="flex flex-col gap-2">
+              <Button onClick={handleToggle} variant="outline" size="sm" className="gap-2">
+                {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 {isRunning ? "Pause" : "Start"}
               </Button>
-              <Button onClick={handleReset} variant="ghost" size="default" className="gap-2 text-base">
-                <RotateCcw className="h-5 w-5" />
+              <Button onClick={handleReset} variant="ghost" size="sm" className="gap-2">
+                <RotateCcw className="h-4 w-4" />
                 Reset
               </Button>
             </div>
           </div>
 
           {/* Stats */}
-          <div className="flex gap-6">
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-lg text-base font-medium ${targetReached ? 'bg-typing/20 text-typing' : 'bg-muted text-muted-foreground'}`}>
-              <FileText className="h-5 w-5" />
+          <div className="flex gap-4">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium ${targetReached ? 'bg-typing/20 text-typing' : 'bg-muted text-muted-foreground'}`}>
+              <FileText className="h-4 w-4" />
               <span>{wordCount} / {minWords}{maxWords ? `-${maxWords}` : '+'} words</span>
-              {targetReached && <CheckCircle2 className="h-5 w-5" />}
+              {targetReached && <CheckCircle2 className="h-4 w-4" />}
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-muted text-muted-foreground text-base font-medium">
-              <Zap className="h-5 w-5" />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-sm font-medium">
+              <Zap className="h-4 w-4" />
               <span>{wpm} WPM</span>
             </div>
           </div>
         </div>
 
+        {/* Full Screen Layout: Image Left, Editor Right */}
+        {(question || customImage || cloudImageUrl) ? (
+          <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-300px)] min-h-[600px]">
+            {/* Left Side: Image with Zoom */}
+            <div className="flex-shrink-0 lg:w-1/2 border rounded-lg bg-muted/30 overflow-hidden flex flex-col">
+              <div className="p-3 border-b bg-card flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {cloudImageUrl && (
+                    <Badge variant="secondary" className="gap-1">
+                      <Cloud className="h-3 w-3" />
+                      Assignment Image
+                    </Badge>
+                  )}
+                  {!cloudImageUrl && customImage && (
+                    <Badge variant="secondary" className="gap-1">
+                      <ImageIcon className="h-3 w-3" />
+                      Uploaded Image
+                    </Badge>
+                  )}
+                  {question && !customImage && !cloudImageUrl && (
+                    <Badge variant="secondary" className="gap-1">
+                      <ImageIcon className="h-3 w-3" />
+                      {question.type.replace('-', ' ')}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setImageZoom(Math.max(50, imageZoom - 25))}
+                    disabled={imageZoom <= 50}
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground min-w-[3rem] text-center">{imageZoom}%</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setImageZoom(Math.min(200, imageZoom + 25))}
+                    disabled={imageZoom >= 200}
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </Button>
+                  {!assignmentData?.isAssignment && customImage && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCustomImage(null);
+                        setCloudImageUrl(null);
+                        setImageZoom(100);
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div 
+                ref={imageContainerRef}
+                className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20"
+              >
+                {cloudImageUrl ? (
+                  <img 
+                    src={cloudImageUrl} 
+                    alt="Assignment image" 
+                    className="rounded-md object-contain transition-transform duration-200"
+                    style={{ transform: `scale(${imageZoom / 100})`, maxWidth: '100%', maxHeight: '100%' }}
+                    loading="lazy"
+                  />
+                ) : customImage ? (
+                  <img 
+                    src={customImage} 
+                    alt="Uploaded question" 
+                    className="rounded-md object-contain transition-transform duration-200"
+                    style={{ transform: `scale(${imageZoom / 100})`, maxWidth: '100%', maxHeight: '100%' }}
+                    loading="lazy"
+                  />
+                ) : question && (
+                  <div className="text-center p-8">
+                    <ImageIcon className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                    <h3 className="font-semibold text-foreground mb-2">{question.title}</h3>
+                    <p className="text-sm text-muted-foreground italic">{question.description}</p>
+                  </div>
+                )}
+              </div>
+            </div>
 
-        {/* Essay Editor */}
-        <div className="mb-8">
-          <Textarea
-            ref={textareaRef}
-            value={essay}
-            onChange={(e) => setEssay(e.target.value)}
-            placeholder="Start writing your response here..."
-            className="min-h-[400px] md:min-h-[450px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
-            disabled={showResults}
-          />
-        </div>
+            {/* Right Side: Text Editor */}
+            <div className="flex-1 lg:w-1/2 flex flex-col border rounded-lg bg-card overflow-hidden">
+              <div className="p-3 border-b bg-muted/30">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Your Response</span>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <Textarea
+                  ref={textareaRef}
+                  value={essay}
+                  onChange={(e) => setEssay(e.target.value)}
+                  placeholder="Start writing your response here..."
+                  className="h-full w-full text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50 border-0 rounded-none"
+                  disabled={showResults}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Fallback: Regular Editor when no image/question */
+          <div className="mb-8">
+            <Textarea
+              ref={textareaRef}
+              value={essay}
+              onChange={(e) => setEssay(e.target.value)}
+              placeholder="Start writing your response here..."
+              className="min-h-[400px] md:min-h-[450px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
+              disabled={showResults}
+            />
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-3">

@@ -138,18 +138,9 @@ export function AssignmentManager() {
     batch_id: '',
     use_predefined_topic: false,
     selected_topic_id: '',
-    image_url: '',
-    club_ielts_tasks: false, // Club IELTS Task 1 + Task 2
-    task1_title: '',
-    task1_topic: '',
-    task1_instructions: '',
-    task1_image_url: '',
-    task2_title: '',
-    task2_topic: '',
-    task2_instructions: ''
+    image_url: ''
   });
   
-  const [availableGroups, setAvailableGroups] = useState<Array<{ id: string; name: string; assignments: Assignment[] }>>([]);
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [availableTopics, setAvailableTopics] = useState<GRETopic[] | IELTSTask1Question[] | IELTSTask2Topic[]>([]);
@@ -292,8 +283,7 @@ export function AssignmentManager() {
         .from('assignments')
         .select(`
           *,
-          batch:batches(name),
-          group:assignment_groups(id, name, total_time_minutes)
+          batch:batches(name)
         `)
         .eq('institution_id', activeInstitution.id)
         .order('created_at', { ascending: false });
@@ -320,49 +310,7 @@ export function AssignmentManager() {
           submissionCount: countMap.get(a.id) || 0
         }));
 
-      // Group assignments by group_id
-      const groupedMap = new Map<string, typeof enrichedAssignments>();
-      const ungrouped: typeof enrichedAssignments = [];
-
-      enrichedAssignments.forEach(assignment => {
-        if (!assignment || !assignment.id) return; // Skip invalid assignments
-        
-        if (assignment.group_id) {
-          if (!groupedMap.has(assignment.group_id)) {
-            groupedMap.set(assignment.group_id, []);
-          }
-          groupedMap.get(assignment.group_id)!.push(assignment);
-        } else {
-          ungrouped.push(assignment);
-        }
-      });
-
-      // Sort grouped assignments by order_in_group
-      groupedMap.forEach((assignments, groupId) => {
-        assignments.sort((a, b) => (a.order_in_group || 0) - (b.order_in_group || 0));
-      });
-
-      // Combine grouped and ungrouped assignments
-      const groupedArray: Array<{ isGroup: boolean; groupId?: string; assignments: typeof enrichedAssignments }> = [];
-      
-      // Add grouped assignments
-      groupedMap.forEach((assignments, groupId) => {
-        groupedArray.push({ isGroup: true, groupId, assignments });
-      });
-      
-      // Add ungrouped assignments as individual groups
-      ungrouped.forEach(assignment => {
-        groupedArray.push({ isGroup: false, assignments: [assignment] });
-      });
-
-      // Sort by creation date (use first assignment's date for groups)
-      groupedArray.sort((a, b) => {
-        const aDate = new Date(a.assignments[0]?.created_at || 0).getTime();
-        const bDate = new Date(b.assignments[0]?.created_at || 0).getTime();
-        return bDate - aDate;
-      });
-
-      setAssignments(groupedArray as any);
+      setAssignments(enrichedAssignments as any);
     } catch (err) {
       console.error('Error fetching assignments:', err);
     } finally {
@@ -460,26 +408,15 @@ export function AssignmentManager() {
       return;
     }
     
-    // Validate based on whether clubbing is enabled
-    if (newAssignment.club_ielts_tasks) {
-      if (!newAssignment.task1_title?.trim() || !newAssignment.task1_topic?.trim()) {
-        toast({ title: 'Error', description: 'Please fill in Task 1 title and topic', variant: 'destructive' });
-        return;
-      }
-      if (!newAssignment.task2_title?.trim() || !newAssignment.task2_topic?.trim()) {
-        toast({ title: 'Error', description: 'Please fill in Task 2 title and topic', variant: 'destructive' });
-        return;
-      }
-    } else {
-      if (!newAssignment.title.trim()) {
-        toast({ title: 'Error', description: 'Please enter an assignment title', variant: 'destructive' });
-        return;
-      }
-      
-      if (!newAssignment.topic.trim()) {
-        toast({ title: 'Error', description: 'Please enter or select a topic', variant: 'destructive' });
-        return;
-      }
+    // Validate assignment
+    if (!newAssignment.title.trim()) {
+      toast({ title: 'Error', description: 'Please enter an assignment title', variant: 'destructive' });
+      return;
+    }
+    
+    if (!newAssignment.topic.trim()) {
+      toast({ title: 'Error', description: 'Please enter or select a topic', variant: 'destructive' });
+      return;
     }
     
     setSaving(true);
@@ -507,152 +444,6 @@ export function AssignmentManager() {
           setSaving(false);
           return;
         }
-      }
-
-      // Handle IELTS Task 1 + Task 2 clubbing
-      if (newAssignment.club_ielts_tasks) {
-        // Validate Task 1 and Task 2 details
-        if (!newAssignment.task1_title?.trim() || !newAssignment.task1_topic?.trim()) {
-          toast({ title: 'Error', description: 'Please fill in Task 1 title and topic', variant: 'destructive' });
-          setSaving(false);
-          return;
-        }
-        if (!newAssignment.task2_title?.trim() || !newAssignment.task2_topic?.trim()) {
-          toast({ title: 'Error', description: 'Please fill in Task 2 title and topic', variant: 'destructive' });
-          setSaving(false);
-          return;
-        }
-
-        // Create assignment group
-        const { data: newGroup, error: groupError } = await supabase
-          .from('assignment_groups')
-          .insert({
-            institution_id: activeInstitution.id,
-            name: `${newAssignment.task1_title.trim()} + ${newAssignment.task2_title.trim()}`,
-            total_time_minutes: 60,
-            created_by: user.id
-          })
-          .select()
-          .single();
-        
-        if (groupError) throw groupError;
-        const groupId = newGroup.id;
-
-        // Upload Task 1 image if provided
-        let task1ImageUrl = newAssignment.task1_image_url || null;
-        let task1ImageFile: File | null = null;
-        // We'll handle image upload after creating the assignment
-
-        // Create Task 1 assignment
-        const { data: task1Data, error: task1Error } = await supabase
-          .from('assignments')
-          .insert({
-            institution_id: activeInstitution.id,
-            created_by: user.id,
-            title: newAssignment.task1_title.trim(),
-            topic: newAssignment.task1_topic.trim(),
-            exam_type: 'IELTS_T1',
-            instructions: newAssignment.task1_instructions?.trim() || null,
-            due_date: dueDateISO,
-            batch_id: newAssignment.batch_id && newAssignment.batch_id.trim() ? newAssignment.batch_id.trim() : null,
-            image_url: task1ImageUrl,
-            group_id: groupId,
-            order_in_group: 0
-          })
-          .select()
-          .single();
-
-        if (task1Error) throw task1Error;
-
-        // Upload Task 1 image if provided
-        if (imageFile && task1Data) {
-          const uploadedUrl = await uploadImageToStorage(imageFile, task1Data.id);
-          if (uploadedUrl) {
-            await supabase
-              .from('assignments')
-              .update({ image_url: uploadedUrl })
-              .eq('id', task1Data.id);
-            task1ImageUrl = uploadedUrl;
-          }
-        }
-
-        // Create Task 2 assignment
-        const { data: task2Data, error: task2Error } = await supabase
-          .from('assignments')
-          .insert({
-            institution_id: activeInstitution.id,
-            created_by: user.id,
-            title: newAssignment.task2_title.trim(),
-            topic: newAssignment.task2_topic.trim(),
-            exam_type: 'IELTS_T2',
-            instructions: newAssignment.task2_instructions?.trim() || null,
-            due_date: dueDateISO,
-            batch_id: newAssignment.batch_id && newAssignment.batch_id.trim() ? newAssignment.batch_id.trim() : null,
-            image_url: null,
-            group_id: groupId,
-            order_in_group: 1
-          })
-          .select()
-          .single();
-
-        if (task2Error) throw task2Error;
-
-        // Assign to specific students if selected
-        if (selectedStudentIds.length > 0) {
-          const validStudentIds = selectedStudentIds.filter(memberId => memberId && typeof memberId === 'string' && memberId.trim());
-          const studentAssignments = validStudentIds.flatMap(memberId => [
-            { assignment_id: task1Data.id, member_id: memberId.trim() },
-            { assignment_id: task2Data.id, member_id: memberId.trim() }
-          ]);
-
-          const { error: studentAssignError } = await supabase
-            .from('assignment_students')
-            .insert(studentAssignments);
-
-          if (studentAssignError) {
-            console.error('Error assigning to students:', studentAssignError);
-            toast({ 
-              title: 'Warning', 
-              description: 'Assignments created but some student assignments failed. You can assign manually later.',
-              variant: 'destructive' 
-            });
-          }
-        }
-
-        toast({ title: 'Clubbed assignments created!', description: 'Both Task 1 and Task 2 have been created with a shared 60-minute timer.' });
-        
-        // Reset form
-        const resetForm = {
-          title: '',
-          topic: '',
-          exam_type: 'GRE',
-          task_type: '',
-          instructions: '',
-          due_date: '',
-          due_time: '',
-          batch_id: '',
-          use_predefined_topic: false,
-          selected_topic_id: '',
-          image_url: '',
-          club_ielts_tasks: false,
-          task1_title: '',
-          task1_topic: '',
-          task1_instructions: '',
-          task1_image_url: '',
-          task2_title: '',
-          task2_topic: '',
-          task2_instructions: ''
-        };
-        setNewAssignment(resetForm);
-        setSelectedDate(undefined);
-        setImageFile(null);
-        setImagePreview(null);
-        setSelectedStudentIds([]);
-        setStudentSearchTerm('');
-        setCreateOpen(false);
-        fetchAssignments();
-        setSaving(false);
-        return;
       }
 
       // Regular single assignment creation
@@ -725,27 +516,19 @@ export function AssignmentManager() {
       toast({ title: 'Assignment created!', description: 'Students can now see and submit this assignment.' });
       
       // Reset form
-      const resetForm = {
-        title: '',
-        topic: '',
-        exam_type: 'GRE',
-        task_type: '',
-        instructions: '',
-        due_date: '',
-        due_time: '',
-        batch_id: '',
-        use_predefined_topic: false,
-        selected_topic_id: '',
-        image_url: '',
-        club_ielts_tasks: false,
-        task1_title: '',
-        task1_topic: '',
-        task1_instructions: '',
-        task1_image_url: '',
-        task2_title: '',
-        task2_topic: '',
-        task2_instructions: ''
-      };
+        const resetForm = {
+          title: '',
+          topic: '',
+          exam_type: 'GRE',
+          task_type: '',
+          instructions: '',
+          due_date: '',
+          due_time: '',
+          batch_id: '',
+          use_predefined_topic: false,
+          selected_topic_id: '',
+          image_url: ''
+        };
       setNewAssignment(resetForm);
       setSelectedDate(undefined);
       setImageFile(null);
@@ -1089,134 +872,8 @@ export function AssignmentManager() {
                     </div>
                   </div>
                   
-                  {/* IELTS Clubbing Option - Only show for IELTS Task 1 or Task 2 */}
-                  {(newAssignment.exam_type === 'IELTS_T1' || newAssignment.exam_type === 'IELTS_T2') && (
-                    <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="club_ielts_tasks"
-                          checked={newAssignment.club_ielts_tasks}
-                          onCheckedChange={(checked) => {
-                            setNewAssignment(prev => ({ 
-                              ...prev, 
-                              club_ielts_tasks: checked as boolean
-                            }));
-                          }}
-                        />
-                        <Label htmlFor="club_ielts_tasks" className="font-medium cursor-pointer">
-                          Club IELTS Task 1 and Task 2 together
-                        </Label>
-                      </div>
-                      {newAssignment.club_ielts_tasks && (
-                        <div className="space-y-4 pl-6 border-l-2 border-primary/20">
-                          <p className="text-xs text-muted-foreground mb-4">
-                            Create both Task 1 and Task 2 assignments together with a shared 60-minute timer.
-                          </p>
-                          
-                          {/* Task 1 Details */}
-                          <div className="space-y-3 p-4 bg-background rounded-lg border">
-                            <h4 className="font-semibold text-sm flex items-center gap-2">
-                              <FileText className="h-4 w-4" />
-                              IELTS Task 1 Details
-                            </h4>
-                            <div className="space-y-2">
-                              <Label htmlFor="task1_title">Task 1 Title *</Label>
-                              <Input
-                                id="task1_title"
-                                placeholder="e.g., Weekly Practice - Task 1"
-                                value={newAssignment.task1_title || ''}
-                                onChange={(e) => setNewAssignment(prev => ({ ...prev, task1_title: e.target.value }))}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="task1_topic">Task 1 Topic *</Label>
-                              <Textarea
-                                id="task1_topic"
-                                placeholder="Enter Task 1 topic or question..."
-                                value={newAssignment.task1_topic || ''}
-                                onChange={(e) => setNewAssignment(prev => ({ ...prev, task1_topic: e.target.value }))}
-                                className="min-h-[80px]"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="task1_instructions">Task 1 Instructions (optional)</Label>
-                              <Textarea
-                                id="task1_instructions"
-                                placeholder="Additional instructions for Task 1..."
-                                value={newAssignment.task1_instructions || ''}
-                                onChange={(e) => setNewAssignment(prev => ({ ...prev, task1_instructions: e.target.value }))}
-                                className="min-h-[60px]"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="task1_image">Task 1 Image (optional)</Label>
-                              <Input
-                                id="task1_image"
-                                type="file"
-                                accept="image/png,image/jpeg,image/jpg"
-                                onChange={handleImageSelect}
-                                className="cursor-pointer"
-                              />
-                              {imagePreview && (
-                                <div className="relative inline-block">
-                                  <img src={imagePreview} alt="Preview" className="max-w-xs rounded-lg border" />
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="absolute top-2 right-2"
-                                    onClick={removeImage}
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Task 2 Details */}
-                          <div className="space-y-3 p-4 bg-background rounded-lg border">
-                            <h4 className="font-semibold text-sm flex items-center gap-2">
-                              <BookOpen className="h-4 w-4" />
-                              IELTS Task 2 Details
-                            </h4>
-                            <div className="space-y-2">
-                              <Label htmlFor="task2_title">Task 2 Title *</Label>
-                              <Input
-                                id="task2_title"
-                                placeholder="e.g., Weekly Practice - Task 2"
-                                value={newAssignment.task2_title || ''}
-                                onChange={(e) => setNewAssignment(prev => ({ ...prev, task2_title: e.target.value }))}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="task2_topic">Task 2 Topic *</Label>
-                              <Textarea
-                                id="task2_topic"
-                                placeholder="Enter Task 2 topic or question..."
-                                value={newAssignment.task2_topic || ''}
-                                onChange={(e) => setNewAssignment(prev => ({ ...prev, task2_topic: e.target.value }))}
-                                className="min-h-[80px]"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="task2_instructions">Task 2 Instructions (optional)</Label>
-                              <Textarea
-                                id="task2_instructions"
-                                placeholder="Additional instructions for Task 2..."
-                                value={newAssignment.task2_instructions || ''}
-                                onChange={(e) => setNewAssignment(prev => ({ ...prev, task2_instructions: e.target.value }))}
-                                className="min-h-[60px]"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Topic & Details Section - Only show when NOT clubbing */}
-                  {!newAssignment.club_ielts_tasks && (
+                  {/* Topic & Details Section */}
+                  <div className="space-y-4 pt-4 border-t">
                     <div className="space-y-4 pt-4 border-t">
                       <div className="flex items-center gap-2">
                         <input
@@ -1383,7 +1040,6 @@ export function AssignmentManager() {
                         )}
                       </div>
                     </div>
-                  )}
 
                   {/* Timeline & Settings Section */}
                   <div className="space-y-4 pt-4 border-t">
@@ -1522,9 +1178,8 @@ export function AssignmentManager() {
                   onClick={createAssignment} 
                   disabled={
                     saving || 
-                    (newAssignment.club_ielts_tasks 
-                      ? (!newAssignment.task1_title?.trim() || !newAssignment.task1_topic?.trim() || !newAssignment.task2_title?.trim() || !newAssignment.task2_topic?.trim())
-                      : (!newAssignment.title.trim() || !newAssignment.topic.trim()))
+                    !newAssignment.title.trim() || 
+                    !newAssignment.topic.trim()
                   }
                 >
                   {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

@@ -180,30 +180,6 @@ export function StudentAssignments() {
   const startAssignment = async (assignment: Assignment) => {
     if (!activeMembership) return;
 
-    // Check if this assignment is part of a group
-    if (assignment.group_id && assignment.group) {
-      // Fetch all assignments in the group
-      const { data: groupAssignments, error: groupError } = await supabase
-        .from('assignments')
-        .select('*')
-        .eq('group_id', assignment.group_id)
-        .eq('is_active', true)
-        .order('order_in_group', { ascending: true });
-
-      if (!groupError && groupAssignments && groupAssignments.length > 1) {
-        // Navigate to combined assignment view
-        navigate('/institution/combined-assignment', {
-          state: {
-            groupId: assignment.group_id,
-            groupName: assignment.group.name,
-            totalTimeMinutes: assignment.group.total_time_minutes,
-            assignments: groupAssignments
-          }
-        });
-        return;
-      }
-    }
-
     // Create submission record if it doesn't exist
     if (!assignment.submission) {
       await supabase
