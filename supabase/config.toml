@@ -1,0 +1,4 @@
+project_id = "enigcyvybtbmqovnjbfq"
+
+[functions.ai-score]
+verify_jwt = false

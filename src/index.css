@@ -1,0 +1,194 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Merriweather:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ScoreWise Design System - Academic Navy Theme */
+    --background: 40 30% 98%;
+    --foreground: 210 50% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 50% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 50% 15%;
+
+    /* Deep Navy Primary */
+    --primary: 210 50% 20%;
+    --primary-foreground: 40 30% 98%;
+
+    /* Soft Slate Secondary */
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 210 50% 20%;
+
+    /* Muted Tones */
+    --muted: 210 15% 92%;
+    --muted-foreground: 210 20% 45%;
+
+    /* Accent - Warm Gold */
+    --accent: 38 95% 55%;
+    --accent-foreground: 210 50% 15%;
+
+    /* Module Colors */
+    --essay: 210 70% 45%;
+    --essay-foreground: 0 0% 100%;
+    --typing: 160 60% 40%;
+    --typing-foreground: 0 0% 100%;
+    --vocab: 280 60% 50%;
+    --vocab-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 20% 88%;
+    --input: 210 20% 88%;
+    --ring: 210 50% 20%;
+
+    --radius: 0.75rem;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(210 50% 15% / 0.05);
+    --shadow: 0 4px 6px -1px hsl(210 50% 15% / 0.1), 0 2px 4px -2px hsl(210 50% 15% / 0.1);
+    --shadow-md: 0 10px 15px -3px hsl(210 50% 15% / 0.1), 0 4px 6px -4px hsl(210 50% 15% / 0.1);
+    --shadow-lg: 0 20px 25px -5px hsl(210 50% 15% / 0.1), 0 8px 10px -6px hsl(210 50% 15% / 0.1);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 210 50% 8%;
+    --foreground: 40 30% 95%;
+
+    --card: 210 50% 12%;
+    --card-foreground: 40 30% 95%;
+
+    --popover: 210 50% 12%;
+    --popover-foreground: 40 30% 95%;
+
+    --primary: 40 30% 95%;
+    --primary-foreground: 210 50% 15%;
+
+    --secondary: 210 30% 18%;
+    --secondary-foreground: 40 30% 95%;
+
+    --muted: 210 30% 18%;
+    --muted-foreground: 210 15% 60%;
+
+    --accent: 38 95% 55%;
+    --accent-foreground: 210 50% 15%;
+
+    --essay: 210 70% 55%;
+    --typing: 160 60% 50%;
+    --vocab: 280 60% 60%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 30% 22%;
+    --input: 210 30% 22%;
+    --ring: 40 30% 95%;
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Merriweather', serif;
+  }
+}
+
+@layer components {
+  .module-card {
+    @apply bg-card rounded-xl p-6 shadow-md hover:shadow-lg transition-all duration-300 border border-border;
+  }
+
+  .stat-badge {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium bg-secondary text-secondary-foreground;
+  }
+
+  .timer-display {
+    @apply font-mono text-4xl font-bold tracking-wider;
+  }
+
+  .essay-editor {
+    @apply w-full min-h-[60vh] p-6 text-lg leading-relaxed bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none;
+    font-family: 'Georgia', serif;
+  }
+
+  .vocab-card {
+    @apply bg-card rounded-xl p-5 border border-border hover:border-primary/30 transition-all duration-200 hover:shadow-md;
+  }
+
+  .nav-tab {
+    @apply flex flex-col items-center gap-1 px-4 py-2 text-muted-foreground transition-colors;
+  }
+
+  .nav-tab.active {
+    @apply text-primary;
+  }
+
+  .nav-tab:hover:not(.active) {
+    @apply text-foreground;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out forwards;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
