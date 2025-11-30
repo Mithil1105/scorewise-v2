@@ -35,48 +35,42 @@ export function CookieConsentBanner() {
   if (!isVisible) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 p-4 md:p-6 animate-in slide-in-from-bottom duration-300">
-      <Card className="max-w-4xl mx-auto shadow-lg border-2">
-        <CardContent className="p-4 md:p-6">
-          <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-            <div className="flex-shrink-0">
-              <Cookie className="h-6 w-6 text-primary" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-sm md:text-base mb-2">
-                We Use Cookies
-              </h3>
-              <p className="text-xs md:text-sm text-muted-foreground mb-2">
-                ScoreWise uses essential cookies to maintain your login session and provide 
-                secure access to your account. These cookies are required for the service to 
-                function properly. By continuing to use ScoreWise, you consent to our use of 
-                cookies as described in our{" "}
-                <Link to="/cookies" className="text-primary hover:underline font-medium">
-                  Cookie Policy
-                </Link>
-                .
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-              <Button
-                onClick={handleAccept}
-                size="sm"
-                className="w-full sm:w-auto"
-              >
-                Accept
-              </Button>
-              <Button
-                onClick={handleDecline}
-                variant="outline"
-                size="sm"
-                className="w-full sm:w-auto"
-              >
-                Decline
-              </Button>
-            </div>
+    <div className="fixed bottom-0 left-0 right-0 z-50 p-3 md:p-4 animate-in slide-in-from-bottom duration-300 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+          <div className="flex-shrink-0 hidden sm:block">
+            <Cookie className="h-5 w-5 text-primary" />
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-sm mb-1.5">
+              We Use Cookies
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              ScoreWise uses essential cookies for login sessions and secure account access. These are required for the service to work.{" "}
+              <Link to="/cookies" className="text-primary hover:underline font-medium inline whitespace-nowrap">
+                Learn more
+              </Link>
+            </p>
+          </div>
+          <div className="flex flex-row gap-2 w-full sm:w-auto sm:flex-shrink-0">
+            <Button
+              onClick={handleDecline}
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-initial text-xs"
+            >
+              Decline
+            </Button>
+            <Button
+              onClick={handleAccept}
+              size="sm"
+              className="flex-1 sm:flex-initial text-xs"
+            >
+              Accept
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
