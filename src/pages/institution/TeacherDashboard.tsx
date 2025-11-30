@@ -15,8 +15,13 @@ import {
   BookOpen, Building2, Users, FileText, 
   ClipboardList, Loader2, GraduationCap, FolderOpen,
   TrendingUp, CheckCircle2, Clock, AlertCircle, Sparkles, ArrowRight,
-  Award
+  Award, ChevronDown, ChevronUp, Eye
 } from 'lucide-react';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { AssignmentManager } from '@/components/institution/AssignmentManager';
 import { BatchManager } from '@/components/institution/BatchManager';
 
@@ -143,6 +148,14 @@ export default function TeacherDashboard() {
         .select('user_id, ai_score, created_at')
         .eq('institution_id', activeInstitution.id)
         .in('user_id', userIds);
+      
+      // Fetch shared essays separately to show topics
+      const { data: sharedEssays } = await supabase
+        .from('essays')
+        .select('id, user_id, topic, exam_type, created_at, shared_with_teacher')
+        .eq('institution_id', activeInstitution.id)
+        .eq('shared_with_teacher', true)
+        .in('user_id', userIds);
 
       // Fetch assignments
       const { data: assignments } = await supabase
@@ -160,6 +173,12 @@ export default function TeacherDashboard() {
       const profileMap = new Map(profiles?.map(p => [p.user_id, p]));
       const countMap = new Map<string, number>();
       const scoreMap = new Map<string, number[]>();
+      const sharedEssaysMap = new Map<string, Array<{
+        id: string;
+        topic: string | null;
+        exam_type: string;
+        created_at: string;
+      }>>();
       
       essays?.forEach(e => {
         countMap.set(e.user_id, (countMap.get(e.user_id) || 0) + 1);
@@ -167,6 +186,20 @@ export default function TeacherDashboard() {
           const scores = scoreMap.get(e.user_id) || [];
           scores.push(e.ai_score);
           scoreMap.set(e.user_id, scores);
+        }
+      });
+
+      // Group shared essays by user_id
+      sharedEssays?.forEach(e => {
+        if (e.shared_with_teacher) {
+          const userEssays = sharedEssaysMap.get(e.user_id) || [];
+          userEssays.push({
+            id: e.id,
+            topic: e.topic,
+            exam_type: e.exam_type,
+            created_at: e.created_at,
+          });
+          sharedEssaysMap.set(e.user_id, userEssays);
         }
       });
 
@@ -181,7 +214,8 @@ export default function TeacherDashboard() {
           profile: profileMap.get(m.user_id),
           email: emailMap.get(m.user_id) || null,
           essayCount: countMap.get(m.user_id) || 0,
-          avgScore: Math.round(avgScore * 10) / 10
+          avgScore: Math.round(avgScore * 10) / 10,
+          sharedEssays: sharedEssaysMap.get(m.user_id) || []
         };
       }) as Student[];
 
@@ -247,19 +281,32 @@ export default function TeacherDashboard() {
     <PageLayout>
       <TopBar />
       <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* Welcome Header */}
+        {/* Welcome Header with Institution Branding */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">
-                Welcome back, {profile?.display_name || 'Teacher'}! 👋
-              </h1>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Building2 className="h-4 w-4" />
-                <span>{activeInstitution.name}</span>
-                <Badge variant="secondary" className="ml-2 capitalize">
-                  {activeMembership.role === 'inst_admin' ? 'Institution Admin' : 'Teacher'}
-                </Badge>
+            <div className="flex items-center gap-4">
+              {/* Institution Logo */}
+              {activeInstitution.logo_url && (
+                <Avatar className="h-16 w-16 border-2" style={{ borderColor: activeInstitution.theme_color || undefined }}>
+                  <AvatarImage src={activeInstitution.logo_url} alt={activeInstitution.name} />
+                  <AvatarFallback style={{ backgroundColor: activeInstitution.theme_color || '#3b82f6', color: 'white' }}>
+                    {activeInstitution.name.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+              )}
+              <div>
+                <h1 className="text-3xl font-bold mb-2" style={{ color: activeInstitution.theme_color || undefined }}>
+                  Welcome back, {profile?.display_name || 'Teacher'}! 👋
+                </h1>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Building2 className="h-4 w-4" />
+                  <span className="font-semibold" style={{ color: activeInstitution.theme_color || undefined }}>
+                    {activeInstitution.name}
+                  </span>
+                  <Badge variant="secondary" className="ml-2 capitalize">
+                    {activeMembership.role === 'inst_admin' ? 'Institution Admin' : 'Teacher'}
+                  </Badge>
+                </div>
               </div>
             </div>
             {activeMembership.role === 'inst_admin' && (
@@ -508,7 +555,11 @@ export default function TeacherDashboard() {
                     </TableHeader>
                     <TableBody>
                       {students.map((student) => (
-                        <TableRow key={student.id}>
+                        <TableRow 
+                          key={student.id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => navigate(`/institution/student-profile/${student.id}`)}
+                        >
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <Avatar className="h-8 w-8">
@@ -528,10 +579,74 @@ export default function TeacherDashboard() {
                             </span>
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-muted-foreground" />
-                              {student.essayCount || 0}
-                            </div>
+                            {student.essayCount > 0 || (student.sharedEssays && student.sharedEssays.length > 0) ? (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-auto p-1">
+                                    <div className="flex items-center gap-2">
+                                      <FileText className="h-4 w-4 text-muted-foreground" />
+                                      <span>{student.essayCount || 0}</span>
+                                      {student.sharedEssays && student.sharedEssays.length > 0 && (
+                                        <Badge variant="outline" className="ml-1 text-xs">
+                                          {student.sharedEssays.length} shared
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80" align="start">
+                                  <div className="space-y-3">
+                                    <div>
+                                      <h4 className="font-semibold text-sm mb-2">Total Essays: {student.essayCount || 0}</h4>
+                                    </div>
+                                    {student.sharedEssays && student.sharedEssays.length > 0 && (
+                                      <div>
+                                        <h4 className="font-semibold text-sm mb-2 text-primary">
+                                          Shared Essays ({student.sharedEssays.length}):
+                                        </h4>
+                                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                                          {student.sharedEssays.map((sharedEssay) => (
+                                            <div 
+                                              key={sharedEssay.id}
+                                              className="p-2 rounded-md bg-muted/50 border border-border hover:bg-muted cursor-pointer transition-colors group"
+                                              onClick={() => navigate(`/institution/review-shared-essay/${sharedEssay.id}`)}
+                                            >
+                                              <div className="flex items-start justify-between gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                  <Badge variant="outline" className="mb-1 text-xs">
+                                                    {sharedEssay.exam_type === 'GRE' ? 'GRE' : 
+                                                     sharedEssay.exam_type === 'IELTS-Task1' ? 'IELTS T1' : 
+                                                     sharedEssay.exam_type === 'IELTS-Task2' ? 'IELTS T2' : 
+                                                     sharedEssay.exam_type}
+                                                  </Badge>
+                                                  <p className="text-sm font-medium line-clamp-2">
+                                                    {sharedEssay.topic || 'Untitled Essay'}
+                                                  </p>
+                                                  <p className="text-xs text-muted-foreground mt-1">
+                                                    {new Date(sharedEssay.created_at).toLocaleDateString()}
+                                                  </p>
+                                                </div>
+                                                <Eye className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0 mt-1" />
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {(!student.sharedEssays || student.sharedEssays.length === 0) && (
+                                      <p className="text-sm text-muted-foreground">
+                                        No essays shared by this student yet.
+                                      </p>
+                                    )}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-muted-foreground" />
+                                <span>0</span>
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>
                             {student.avgScore > 0 ? (

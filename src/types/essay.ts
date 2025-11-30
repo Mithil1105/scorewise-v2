@@ -38,6 +38,7 @@ export interface CloudEssay {
   institution_id: string | null;
   institution_member_id: string | null;
   task1_image_url: string | null;
+  storage_size_kb: number | null;
 }
 
 export interface CloudImage {

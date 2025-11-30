@@ -34,9 +34,11 @@ import InstitutionAdmin from "./pages/institution/InstitutionAdmin";
 import StudentDashboard from "./pages/institution/StudentDashboard";
 import TeacherDashboard from "./pages/institution/TeacherDashboard";
 import ReviewAssignmentEssay from "./pages/institution/ReviewAssignmentEssay";
+import ReviewSharedEssay from "./pages/institution/ReviewSharedEssay";
 import ViewReviewedEssay from "./pages/institution/ViewReviewedEssay";
 import GradingPage from "./pages/institution/GradingPage";
 import CombinedAssignment from "./pages/institution/CombinedAssignment";
+import StudentProfile from "./pages/institution/StudentProfile";
 import NotFound from "./pages/NotFound";
 import Contact from "./pages/legal/contact";
 import Privacy from "./pages/legal/privacy";
@@ -107,6 +109,11 @@ const App = () => (
                   <ReviewAssignmentEssay />
                 </ProtectedRoute>
               } />
+              <Route path="/institution/review-shared-essay/:essayId" element={
+                <ProtectedRoute>
+                  <ReviewSharedEssay />
+                </ProtectedRoute>
+              } />
               <Route path="/institution/view-reviewed-essay/:essayId" element={
                 <ProtectedRoute>
                   <ViewReviewedEssay />
@@ -117,13 +124,18 @@ const App = () => (
                   <GradingPage />
                 </ProtectedRoute>
               } />
-              <Route path="/institution/assignments/group/:groupId" element={
-                <ProtectedRoute>
-                  <CombinedAssignment />
-                </ProtectedRoute>
-              } />
-              
-              {/* Admin Routes - Protected */}
+                      <Route path="/institution/assignments/group/:groupId" element={
+                        <ProtectedRoute>
+                          <CombinedAssignment />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/institution/student-profile/:memberId" element={
+                        <ProtectedRoute>
+                          <StudentProfile />
+                        </ProtectedRoute>
+                      } />
+                      
+                      {/* Admin Routes - Protected */}
               <Route path="/admin" element={
                 <ProtectedRoute>
                   <AdminDashboard />

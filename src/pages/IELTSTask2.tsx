@@ -24,6 +24,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useInstitution } from "@/contexts/InstitutionContext";
 import { LocalEssay } from "@/types/essay";
 import { supabase } from "@/integrations/supabase/client";
+import { getRemainingStorage, calculateStorageSizeKb } from "@/utils/storageUsage";
+import { SubmitSuccessDialog } from "@/components/essay/SubmitSuccessDialog";
 
 const STORAGE_KEY = "scorewise_ielts_task2_draft";
 
@@ -53,11 +55,12 @@ const IELTSTask2 = () => {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [wpm, setWpm] = useState(0);
   const [currentLocalId, setCurrentLocalId] = useState<string | null>(null);
+  const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
   
   const { essays, saveEssays, addEssay, updateEssay, getEssay } = useLocalEssays();
-  const { syncEssays, uploadEssay } = useCloudSync();
+  const { uploadEssay } = useCloudSync();
   const { user, isOnline } = useAuth();
   const { activeMembership } = useInstitution();
 
@@ -106,9 +109,30 @@ const IELTSTask2 = () => {
         return; // No essay text to submit
       }
 
-      // Ensure essay is saved to cloud first
+      // Check storage limit before upload
+      const storageSizeKb = calculateStorageSizeKb(essay);
+      if (user && isOnline) {
+        const { remaining } = await getRemainingStorage(supabase, user.id);
+        if (remaining < storageSizeKb) {
+          toast({
+            title: "Storage limit exceeded",
+            description: "You've used 5MB of storage. Delete old drafts to continue.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Ensure essay is saved to cloud first (only on submit, not auto-sync)
       let essayId = updatedEssay.cloudId;
       if (!essayId && user && isOnline) {
+        console.log("Cloud Upload Payload (Task 2 Assignment):", {
+          examType: updatedEssay.examType,
+          topic: updatedEssay.topic,
+          essayTextLength: updatedEssay.essayText.length,
+          wordCount: updatedEssay.wordCount,
+          storageSizeKb,
+        });
         // Upload essay to cloud
         essayId = await uploadEssay(updatedEssay);
         if (essayId) {
@@ -182,6 +206,9 @@ const IELTSTask2 = () => {
           setShowResults(true);
           // Auto-submit when time runs out
           submitAssignmentEssay();
+          // Clear essay text for next draft
+          setEssay("");
+          setCurrentLocalId(null);
           return 0;
         }
         return prev - 1;
@@ -263,6 +290,8 @@ const IELTSTask2 = () => {
     setTimeLeft(40 * 60);
     setStartTime(null);
     setWpm(0);
+    setEssay("");
+    setShowResults(false);
   }, []);
 
   const handleExport = useCallback(async () => {
@@ -294,18 +323,93 @@ const IELTSTask2 = () => {
     localStorage.removeItem(STORAGE_KEY);
   }, []);
 
+  // Submit essay to cloud (only on final submit, not auto-sync)
+  const handleSubmitEssay = useCallback(async () => {
+    if (!essay.trim() || !currentLocalId || !user || !isOnline) {
+      return;
+    }
+
+    try {
+      const currentEssayData = getEssay(currentLocalId);
+      if (!currentEssayData) return;
+
+      const updatedEssay = {
+        ...currentEssayData,
+        essayText: essay,
+        wordCount: essay.trim() ? essay.trim().split(/\s+/).length : 0,
+        updatedAt: new Date().toISOString()
+      };
+      updateEssay(currentLocalId, updatedEssay);
+
+      // Check storage limit
+      const storageSizeKb = calculateStorageSizeKb(essay);
+      const { remaining } = await getRemainingStorage(supabase, user.id);
+      
+      if (remaining < storageSizeKb) {
+        toast({
+          title: "Storage limit exceeded",
+          description: "You've used 5MB of storage. Delete old drafts to continue.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log("Cloud Upload Payload (Task 2):", {
+        examType: updatedEssay.examType,
+        topic: updatedEssay.topic,
+        essayTextLength: updatedEssay.essayText.length,
+        wordCount: updatedEssay.wordCount,
+        storageSizeKb,
+      });
+
+      const cloudId = await uploadEssay(updatedEssay);
+      if (cloudId) {
+        updateEssay(currentLocalId, { cloudId });
+        setShowSubmitSuccess(true);
+      }
+    } catch (err: any) {
+      console.error('Error submitting essay:', err);
+      toast({
+        title: 'Submission error',
+        description: err.message || 'Failed to submit essay. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  }, [essay, currentLocalId, user, isOnline, getEssay, updateEssay, uploadEssay, toast]);
+
+  const handleTimeEnd = useCallback(async () => {
+    setIsRunning(false);
+    setShowResults(true);
+    forceSave();
+
+    // Auto-submit if this is an assignment (only uploads on submit, not auto-sync)
+    if (assignmentData?.isAssignment) {
+      await submitAssignmentEssay();
+    } else {
+      await handleSubmitEssay();
+    }
+    
+    // Clear essay text for next draft
+    setEssay("");
+    setCurrentLocalId(null);
+  }, [forceSave, submitAssignmentEssay, handleSubmitEssay, assignmentData]);
+
   const handleFinishEarly = useCallback(async () => {
     setIsRunning(false);
     setShowResults(true);
     forceSave();
-    
-    if (user && isOnline) {
-      await syncEssays(essays, saveEssays);
-    }
 
-    // Auto-submit if this is an assignment
-    await submitAssignmentEssay();
-  }, [forceSave, user, isOnline, essays, saveEssays, syncEssays, submitAssignmentEssay]);
+    // For non-assignment essays, offer to submit to cloud (only on submit, not auto-sync)
+    if (!assignmentData?.isAssignment) {
+      await handleSubmitEssay();
+    } else {
+      await submitAssignmentEssay();
+    }
+    
+    // Clear essay text for next draft
+    setEssay("");
+    setCurrentLocalId(null);
+  }, [forceSave, handleSubmitEssay, submitAssignmentEssay, assignmentData]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -527,9 +631,9 @@ const IELTSTask2 = () => {
             ref={textareaRef}
             value={essay}
             onChange={(e) => setEssay(e.target.value)}
-            placeholder="Start writing your essay here..."
-            className="essay-editor"
-            disabled={showResults}
+            placeholder={isRunning ? "Start writing your essay here..." : "Click 'Start' to begin writing..."}
+            className="essay-editor min-h-[500px] text-base"
+            disabled={showResults || !isRunning}
             spellCheck={false}
             autoComplete="off"
             autoCorrect="off"
@@ -603,6 +707,12 @@ const IELTSTask2 = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Submit Success Dialog */}
+      <SubmitSuccessDialog 
+        open={showSubmitSuccess} 
+        onOpenChange={setShowSubmitSuccess} 
+      />
     </PageLayout>
   );
 };

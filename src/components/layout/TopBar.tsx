@@ -3,6 +3,9 @@ import { UserMenu } from './UserMenu';
 import { Button } from '@/components/ui/button';
 import { FileText, Mail } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useInstitution } from '@/contexts/InstitutionContext';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Building2 } from 'lucide-react';
 
 interface TopBarProps {
   title?: string;
@@ -19,6 +22,14 @@ export function TopBar({
 }: TopBarProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { activeInstitution } = useInstitution();
+
+  // Use institution branding if available, otherwise use default
+  const displayTitle = activeInstitution 
+    ? `${activeInstitution.name} • Powered by ScoreWise`
+    : title;
+  const logoUrl = activeInstitution?.logo_url;
+  const themeColor = activeInstitution?.theme_color || undefined;
 
   return (
     <div className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
@@ -35,11 +46,20 @@ export function TopBar({
               <span className="hidden sm:inline">Back</span>
             </Button>
           )}
+          {activeInstitution && logoUrl && (
+            <Avatar className="h-8 w-8">
+              <AvatarImage src={logoUrl} alt={activeInstitution.name} />
+              <AvatarFallback style={{ backgroundColor: themeColor, color: 'white' }}>
+                {activeInstitution.name.charAt(0)}
+              </AvatarFallback>
+            </Avatar>
+          )}
           <h1 
-            className="text-lg font-bold cursor-pointer hover:text-primary transition-colors"
+            className="text-lg font-bold cursor-pointer hover:text-primary transition-colors flex items-center gap-2"
             onClick={() => navigate(user ? '/dashboard' : '/')}
+            style={themeColor ? { color: themeColor } : undefined}
           >
-            {title}
+            {displayTitle}
           </h1>
         </div>
         

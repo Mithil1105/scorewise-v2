@@ -723,7 +723,12 @@ export default function InstitutionAdmin() {
                         <TableRow 
                           key={member.id}
                           data-pending-member={member.status === 'pending' ? 'true' : undefined}
-                          className={member.status === 'pending' ? 'bg-amber-50 dark:bg-amber-950/20' : ''}
+                          className={`${member.status === 'pending' ? 'bg-amber-50 dark:bg-amber-950/20' : ''} ${member.role === 'student' ? 'cursor-pointer hover:bg-muted/50' : ''}`}
+                          onClick={() => {
+                            if (member.role === 'student' && member.status === 'active') {
+                              navigate(`/institution/student-profile/${member.id}`);
+                            }
+                          }}
                         >
                           <TableCell>
                             <div className="font-medium">

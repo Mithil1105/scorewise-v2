@@ -38,7 +38,8 @@ interface SubmissionData {
   teacher_feedback: string | null;
   teacher_score: number | null;
   reviewed_at: string | null;
-  assignment_id: string;
+  assignment_id: string | null;
+  isSharedEssay?: boolean;
 }
 
 interface AssignmentData {
@@ -108,29 +109,59 @@ export default function ViewReviewedEssay() {
         const correctionsData = await fetchCorrections(essayId);
         setCorrections(correctionsData);
 
-        // Fetch submission
+        // Try to fetch submission from assignment_submissions first
         const { data: submissionData, error: submissionError } = await supabase
           .from('assignment_submissions')
           .select('id, status, submitted_at, teacher_feedback, teacher_score, reviewed_at, assignment_id')
           .eq('essay_id', essayId)
           .maybeSingle();
 
-        if (submissionError) throw submissionError;
+        if (submissionError) {
+          console.error('Error fetching submission:', submissionError);
+        }
 
+        // If no assignment submission, check for shared essay review
         if (submissionData) {
-          setSubmission(submissionData);
+          setSubmission({ ...submissionData, isSharedEssay: false });
 
           // Fetch assignment
-          const { data: assignmentData, error: assignmentError } = await supabase
-            .from('assignments')
-            .select('id, title, topic, instructions, image_url, exam_type')
-            .eq('id', submissionData.assignment_id)
+          if (submissionData.assignment_id) {
+            const { data: assignmentData, error: assignmentError } = await supabase
+              .from('assignments')
+              .select('id, title, topic, instructions, image_url, exam_type')
+              .eq('id', submissionData.assignment_id)
+              .maybeSingle();
+
+            if (assignmentError) {
+              console.error('Error fetching assignment:', assignmentError);
+            } else if (assignmentData) {
+              setAssignment(assignmentData);
+            }
+          }
+        } else {
+          // Check for shared essay review
+          const { data: sharedReview, error: sharedReviewError } = await supabase
+            .from('shared_essay_reviews')
+            .select('id, teacher_feedback, teacher_score, reviewed_at, essay_id')
+            .eq('essay_id', essayId)
             .maybeSingle();
 
-          if (assignmentError) {
-            console.error('Error fetching assignment:', assignmentError);
-          } else if (assignmentData) {
-            setAssignment(assignmentData);
+          if (sharedReviewError) {
+            console.error('Error fetching shared essay review:', sharedReviewError);
+          }
+
+          if (sharedReview) {
+            // Create a mock submission object from shared essay review
+            setSubmission({
+              id: sharedReview.id,
+              status: 'reviewed',
+              submitted_at: null,
+              teacher_feedback: sharedReview.teacher_feedback,
+              teacher_score: sharedReview.teacher_score,
+              reviewed_at: sharedReview.reviewed_at,
+              assignment_id: null,
+              isSharedEssay: true,
+            });
           }
         }
 
@@ -198,7 +229,7 @@ export default function ViewReviewedEssay() {
     );
   }
 
-  if (!essay || !submission) {
+  if (!essay) {
     return (
       <PageLayout>
         <TopBar />
@@ -207,6 +238,35 @@ export default function ViewReviewedEssay() {
             <CardContent className="p-6 text-center">
               <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
               <p className="text-muted-foreground">Essay not found</p>
+            </CardContent>
+          </Card>
+        </div>
+      </PageLayout>
+    );
+  }
+
+  // If no submission/review found, show essay but indicate it hasn't been reviewed
+  if (!submission) {
+    return (
+      <PageLayout>
+        <TopBar />
+        <div className="container mx-auto p-6 max-w-5xl">
+          <div className="mb-6">
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/institution/student')}
+              className="mb-4"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+            <h1 className="text-3xl font-bold mb-2">Essay</h1>
+          </div>
+          <Card>
+            <CardContent className="p-6 text-center">
+              <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <p className="text-muted-foreground mb-2">This essay has not been reviewed yet.</p>
+              <p className="text-sm text-muted-foreground">{essay.topic || 'No topic'}</p>
             </CardContent>
           </Card>
         </div>
@@ -265,8 +325,8 @@ export default function ViewReviewedEssay() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Info & Feedback */}
           <div className="space-y-6">
-            {/* Assignment Info */}
-            {assignment && (
+            {/* Assignment Info or Essay Info */}
+            {assignment ? (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -291,6 +351,36 @@ export default function ViewReviewedEssay() {
                       </p>
                     </div>
                   )}
+                  {submission.reviewed_at && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Reviewed</Label>
+                      <p className="text-sm">
+                        {format(new Date(submission.reviewed_at), 'MMM d, yyyy h:mm a')}
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Essay Information
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Topic</Label>
+                    <p className="font-medium">{essay.topic || 'No topic'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Type</Label>
+                    <Badge variant="outline">{essay.exam_type}</Badge>
+                    {submission.isSharedEssay && (
+                      <Badge variant="secondary" className="ml-2">Shared Essay</Badge>
+                    )}
+                  </div>
                   {submission.reviewed_at && (
                     <div>
                       <Label className="text-xs text-muted-foreground">Reviewed</Label>

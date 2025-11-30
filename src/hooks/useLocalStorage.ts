@@ -21,6 +21,13 @@ export function useLocalEssays() {
   const saveEssays = useCallback((newEssays: LocalEssay[]) => {
     localStorage.setItem(ESSAYS_KEY, JSON.stringify(newEssays));
     setEssays(newEssays);
+    // Log total essays and their text lengths
+    const totalTextLength = newEssays.reduce((sum, e) => sum + (e.essayText?.length || 0), 0);
+    console.log('Draft saved:', {
+      totalEssays: newEssays.length,
+      totalTextLength,
+      essaysWithText: newEssays.filter(e => e.essayText && e.essayText.length > 0).length,
+    });
   }, []);
 
   const addEssay = useCallback((essay: LocalEssay) => {
@@ -39,6 +46,14 @@ export function useLocalEssays() {
           : e
       );
       localStorage.setItem(ESSAYS_KEY, JSON.stringify(updated));
+      const updatedEssay = updated.find(e => e.localId === localId);
+      if (updatedEssay && updates.essayText !== undefined) {
+        console.log('Draft saved:', {
+          localId: updatedEssay.localId,
+          essayTextLength: updatedEssay.essayText?.length || 0,
+          wordCount: updatedEssay.wordCount,
+        });
+      }
       return updated;
     });
   }, []);

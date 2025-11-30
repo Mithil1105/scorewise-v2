@@ -57,17 +57,43 @@ export function StudentAssignments() {
     setLoading(true);
     try {
       // Fetch all assignments for the institution
+      // First fetch assignments without the group join to avoid errors
       const { data: allAssignments, error: assignmentsError } = await supabase
         .from('assignments')
-        .select(`
-          *,
-          group:assignment_groups(id, name, total_time_minutes)
-        `)
+        .select('*')
         .eq('institution_id', activeInstitution.id)
         .eq('is_active', true)
         .order('due_date', { ascending: true, nullsFirst: false });
 
-      if (assignmentsError) throw assignmentsError;
+      if (assignmentsError) {
+        console.error('Error fetching assignments:', assignmentsError);
+        throw assignmentsError;
+      }
+
+      // If assignments have group_id, fetch group details separately
+      const assignmentsWithGroupIds = (allAssignments || []).filter(a => a.group_id);
+      const groupIds = [...new Set(assignmentsWithGroupIds.map(a => a.group_id).filter(Boolean))];
+      
+      let groupsMap = new Map();
+      if (groupIds.length > 0) {
+        const { data: groups, error: groupsError } = await supabase
+          .from('assignment_groups')
+          .select('id, name, total_time_minutes')
+          .in('id', groupIds);
+        
+        if (groupsError) {
+          console.warn('Error fetching assignment groups (non-critical):', groupsError);
+          // Continue without groups - assignments will still work
+        } else if (groups) {
+          groupsMap = new Map(groups.map(g => [g.id, g]));
+        }
+      }
+
+      // Enrich assignments with group data
+      const enrichedAssignments = (allAssignments || []).map(assignment => ({
+        ...assignment,
+        group: assignment.group_id ? groupsMap.get(assignment.group_id) || null : null
+      }));
 
       // Fetch student-specific assignments
       const { data: studentAssignments, error: studentAssignmentsError } = await supabase
@@ -103,25 +129,29 @@ export function StudentAssignments() {
       const studentBatchIds = new Set(studentBatches?.map(sb => sb.batch_id) || []);
 
       // Filter assignments:
-      // 1. If assignment has batch_id, only show if student is in that batch
-      // 2. If assignment has specific students assigned (via assignment_students table), only show if this student is in the list
+      // Priority order:
+      // 1. If assignment has specific students assigned (via assignment_students table), only show if this student is in the list
+      // 2. If assignment has batch_id, only show if student is in that batch
       // 3. If assignment has no batch_id AND no specific students, show to ALL students (assigned to everyone)
-      const assignmentsData = (allAssignments || []).filter(assignment => {
-        // First check: If assignment has a batch_id, student must be in that batch
-        if (assignment.batch_id) {
-          const isInBatch = studentBatchIds.has(assignment.batch_id);
-          return isInBatch;
-        }
-        
-        // Second check: If assignment has specific students assigned (entries in assignment_students table)
+      // This ensures new students can see assignments that were created for "everyone" before they joined
+      const assignmentsData = (enrichedAssignments || []).filter(assignment => {
+        // First check: If assignment has specific students assigned (entries in assignment_students table)
+        // This takes priority - if specific students are assigned, only show to those students
         if (assignmentsWithSpecificStudents.has(assignment.id)) {
           // Only show if this student is specifically assigned
           const isAssigned = studentAssignmentIds.has(assignment.id);
           return isAssigned;
         }
         
+        // Second check: If assignment has a batch_id, student must be in that batch
+        if (assignment.batch_id) {
+          const isInBatch = studentBatchIds.has(assignment.batch_id);
+          return isInBatch;
+        }
+        
         // Third case: Assignment has no batch_id AND no specific students
-        // This means it's assigned to "everyone" - show to all students
+        // This means it's assigned to "everyone" - show to ALL students in the institution
+        // This includes new students who joined after the assignment was created
         return true;
       });
       
@@ -144,7 +174,8 @@ export function StudentAssignments() {
         submissions?.map(s => [s.assignment_id, s]) || []
       );
 
-      const enrichedAssignments = (assignmentsData || []).map(a => ({
+      // Map assignments with their submissions (reusing enrichedAssignments from above)
+      const assignmentsWithSubmissions = (assignmentsData || []).map(a => ({
         ...a,
         submission: submissionMap.get(a.id)
       }));
@@ -153,7 +184,7 @@ export function StudentAssignments() {
       const groupedMap = new Map<string, Assignment[]>();
       const ungrouped: Assignment[] = [];
 
-      enrichedAssignments.forEach(assignment => {
+      assignmentsWithSubmissions.forEach(assignment => {
         if (assignment.group_id && assignment.group) {
           if (!groupedMap.has(assignment.group_id)) {
             groupedMap.set(assignment.group_id, []);

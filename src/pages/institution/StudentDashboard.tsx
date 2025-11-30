@@ -8,6 +8,7 @@ import { TopBar } from '@/components/layout/TopBar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Loader2 } from 'lucide-react';
 import { 
   GraduationCap, Building2, FileText, TrendingUp, 
@@ -27,7 +28,7 @@ interface StudentStats {
 
 interface ReviewedAssignment {
   id: string;
-  assignment_id: string;
+  assignment_id: string | null;
   essay_id: string | null;
   assignment: {
     id: string;
@@ -38,6 +39,7 @@ interface ReviewedAssignment {
   teacher_score: number | null;
   reviewed_at: string | null;
   status: string;
+  isSharedEssay?: boolean;
 }
 
 export default function StudentDashboard() {
@@ -96,13 +98,31 @@ export default function StudentDashboard() {
     
     setLoading(true);
     try {
-      // Fetch essays
-      const { data: essays } = await supabase
+      // Fetch essays for this user
+      // Filter by user_id first, then filter by institution in memory if needed
+      const { data: essays, error: essaysError } = await supabase
         .from('essays')
-        .select('ai_score, created_at, teacher_score')
-        .eq('institution_id', activeInstitution.id)
+        .select('ai_score, created_at, teacher_score, institution_id, institution_member_id')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
+
+      if (essaysError) {
+        console.error('Error fetching essays:', essaysError);
+      }
+
+      // Filter essays by institution if institution_id column exists
+      const filteredEssays = (essays || []).filter(e => {
+        // If essay has institution_id, match it
+        if (e.institution_id) {
+          return e.institution_id === activeInstitution.id;
+        }
+        // If essay has institution_member_id, check if it matches
+        if (e.institution_member_id) {
+          return e.institution_member_id === activeMembership.id;
+        }
+        // If no institution fields, include it (legacy essays)
+        return true;
+      });
 
       // Fetch assignments for this institution
       const { data: assignments } = await supabase
@@ -134,7 +154,7 @@ export default function StudentDashboard() {
       }).length || 0;
 
       // Calculate average score from teacher scores (preferred) or AI scores
-      const scoredEssays = essays?.filter(e => e.teacher_score !== null || e.ai_score !== null) || [];
+      const scoredEssays = filteredEssays?.filter(e => e.teacher_score !== null || e.ai_score !== null) || [];
       const avgScore = scoredEssays.length > 0
         ? scoredEssays.reduce((sum, e) => {
             // Prefer teacher_score, fallback to ai_score
@@ -169,7 +189,7 @@ export default function StudentDashboard() {
     try {
       // Fetch reviewed submissions with assignment details
       // Show all reviewed assignments (with feedback or score)
-      const { data: submissions, error } = await supabase
+      const { data: submissions, error: submissionsError } = await supabase
         .from('assignment_submissions')
         .select(`
           id,
@@ -189,12 +209,14 @@ export default function StudentDashboard() {
         .eq('status', 'reviewed')
         .or('teacher_feedback.not.is.null,teacher_score.not.is.null')
         .order('reviewed_at', { ascending: false })
-        .limit(5);
+        .limit(10);
 
-      if (error) throw error;
+      if (submissionsError) {
+        console.error('Error fetching assignment submissions:', submissionsError);
+      }
 
-      // Transform the data to match our interface
-      const reviewed = (submissions || []).map((sub: any) => ({
+      // Transform assignment submissions to match our interface
+      const reviewedFromAssignments = (submissions || []).map((sub: any) => ({
         id: sub.id,
         assignment_id: sub.assignment_id,
         essay_id: sub.essay_id,
@@ -203,9 +225,75 @@ export default function StudentDashboard() {
         teacher_score: sub.teacher_score,
         reviewed_at: sub.reviewed_at,
         status: sub.status,
+        isSharedEssay: false,
       }));
 
-      setReviewedAssignments(reviewed);
+      // Fetch shared essay reviews (essays shared by student and reviewed by teacher)
+      // Only fetch reviews for essays that belong to this student
+      const { data: sharedEssayReviews, error: sharedReviewsError } = await supabase
+        .from('shared_essay_reviews')
+        .select(`
+          id,
+          essay_id,
+          teacher_feedback,
+          teacher_score,
+          reviewed_at,
+          essay:essays!inner(
+            id,
+            topic,
+            exam_type,
+            user_id,
+            institution_member_id
+          )
+        `)
+        .order('reviewed_at', { ascending: false })
+        .limit(10);
+
+      // Filter to only show reviews for essays that belong to this student
+      const filteredSharedReviews = (sharedEssayReviews || []).filter((review: any) => {
+        const essay = review.essay;
+        // Check if essay belongs to this student
+        if (essay.user_id === user?.id) {
+          return true;
+        }
+        // Also check by institution_member_id if available
+        if (essay.institution_member_id === activeMembership.id) {
+          return true;
+        }
+        return false;
+      });
+
+      if (sharedReviewsError) {
+        console.error('Error fetching shared essay reviews:', sharedReviewsError);
+      }
+
+      // Transform shared essay reviews to match our interface
+      const reviewedFromSharedEssays = filteredSharedReviews.map((review: any) => ({
+        id: review.id,
+        assignment_id: null,
+        essay_id: review.essay_id,
+        assignment: {
+          id: review.essay_id,
+          title: review.essay.topic || 'Shared Essay',
+          exam_type: review.essay.exam_type,
+        },
+        teacher_feedback: review.teacher_feedback,
+        teacher_score: review.teacher_score,
+        reviewed_at: review.reviewed_at,
+        status: 'reviewed',
+        isSharedEssay: true,
+      }));
+
+      // Combine both types of reviews and sort by reviewed_at
+      const allReviewed = [...reviewedFromAssignments, ...reviewedFromSharedEssays]
+        .sort((a, b) => {
+          const dateA = a.reviewed_at ? new Date(a.reviewed_at).getTime() : 0;
+          const dateB = b.reviewed_at ? new Date(b.reviewed_at).getTime() : 0;
+          return dateB - dateA; // Most recent first
+        })
+        .slice(0, 10); // Limit to 10 most recent
+
+      setReviewedAssignments(allReviewed);
     } catch (err) {
       console.error('Error fetching reviewed assignments:', err);
     } finally {
@@ -257,17 +345,30 @@ export default function StudentDashboard() {
     <PageLayout>
       <TopBar />
       <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* Welcome Header */}
+        {/* Welcome Header with Institution Branding */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">
-                Welcome, {profile?.display_name || 'Student'}! 🎓
-              </h1>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Building2 className="h-4 w-4" />
-                <span>{activeInstitution.name}</span>
-                <Badge variant="secondary" className="ml-2">Student</Badge>
+            <div className="flex items-center gap-4">
+              {/* Institution Logo */}
+              {activeInstitution.logo_url && (
+                <Avatar className="h-16 w-16 border-2" style={{ borderColor: activeInstitution.theme_color || undefined }}>
+                  <AvatarImage src={activeInstitution.logo_url} alt={activeInstitution.name} />
+                  <AvatarFallback style={{ backgroundColor: activeInstitution.theme_color || '#3b82f6', color: 'white' }}>
+                    {activeInstitution.name.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+              )}
+              <div>
+                <h1 className="text-3xl font-bold mb-2" style={{ color: activeInstitution.theme_color || undefined }}>
+                  Welcome, {profile?.display_name || 'Student'}! 🎓
+                </h1>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Building2 className="h-4 w-4" />
+                  <span className="font-semibold" style={{ color: activeInstitution.theme_color || undefined }}>
+                    {activeInstitution.name}
+                  </span>
+                  <Badge variant="secondary" className="ml-2">Student</Badge>
+                </div>
               </div>
             </div>
           </div>
@@ -526,6 +627,11 @@ export default function StudentDashboard() {
                               <Badge variant="outline" className="text-xs">
                                 {reviewed.assignment.exam_type}
                               </Badge>
+                              {reviewed.isSharedEssay && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Shared Essay
+                                </Badge>
+                              )}
                               {reviewed.reviewed_at && (
                                 <span className="flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />

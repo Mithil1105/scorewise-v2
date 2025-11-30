@@ -3,19 +3,24 @@ import { supabase } from '@/integrations/supabase/client';
 import { LocalEssay, LocalImage, CloudEssay } from '@/types/essay';
 import { useAuth } from '@/contexts/AuthContext';
 import { useInstitution } from '@/contexts/InstitutionContext';
+import { useToast } from '@/hooks/use-toast';
+
+const STORAGE_LIMIT_BYTES = 5 * 1024 * 1024; // 5MB in bytes
 
 export function useCloudSync() {
   const { user, isOnline } = useAuth();
   const { activeMembership, activeInstitution } = useInstitution();
+  const { toast } = useToast();
   const [syncing, setSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
   const fetchCloudEssays = useCallback(async (): Promise<CloudEssay[]> => {
     if (!user || !isOnline) return [];
 
+    // Always fetch essay_text and all required fields
     const { data, error } = await supabase
       .from('essays')
-      .select('*')
+      .select('id, user_id, exam_type, topic, essay_text, created_at, updated_at, word_count, ai_score, ai_feedback, local_id, institution_id, institution_member_id, task1_image_url, content_size')
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false });
 
@@ -24,11 +29,74 @@ export function useCloudSync() {
       return [];
     }
 
+    console.log('Cloud essays fetched:', data?.length || 0, 'essays');
     return data || [];
+  }, [user, isOnline]);
+
+  const getUserStorageUsage = useCallback(async (): Promise<number> => {
+    if (!user || !isOnline) return 0;
+
+    try {
+      const { data, error } = await supabase.rpc('get_user_storage_usage', {
+        uid: user.id
+      });
+
+      if (error) {
+        console.error('Error getting storage usage:', error);
+        // Fallback: calculate manually
+        const { data: essays } = await supabase
+          .from('essays')
+          .select('content_size')
+          .eq('user_id', user.id);
+        
+        return essays?.reduce((sum, e) => sum + (e.content_size || 0), 0) || 0;
+      }
+
+      return data || 0;
+    } catch (err) {
+      console.error('Error calculating storage usage:', err);
+      return 0;
+    }
   }, [user, isOnline]);
 
   const uploadEssay = useCallback(async (essay: LocalEssay): Promise<string | null> => {
     if (!user || !isOnline) return null;
+
+    // NEVER upload Task 1 images - only text content
+    if (essay.examType === 'IELTS-Task1') {
+      console.log('Skipping Task 1 image upload - only syncing text content');
+    }
+
+    // Calculate essay text size in bytes
+    const essayTextSize = new Blob([essay.essayText || '']).size;
+
+    // Check storage limit before upload
+    const currentUsage = await getUserStorageUsage();
+    const newUsage = currentUsage + essayTextSize;
+
+    if (newUsage > STORAGE_LIMIT_BYTES) {
+      const usedMb = (currentUsage / (1024 * 1024)).toFixed(2);
+      const limitMb = (STORAGE_LIMIT_BYTES / (1024 * 1024)).toFixed(0);
+      console.log('Storage limit reached:', usedMb, 'MB /', limitMb, 'MB');
+      
+      toast({
+        title: 'Storage limit reached',
+        description: `You've used ${usedMb} MB of ${limitMb} MB. Delete old drafts to continue.`,
+        variant: 'destructive',
+      });
+      return null;
+    }
+
+    // Calculate storage size in KB
+    const storageSizeKb = Math.ceil(essayTextSize / 1024);
+
+    console.log('Cloud Upload Payload:', {
+      examType: essay.examType,
+      topic: essay.topic,
+      essayTextLength: essay.essayText?.length || 0,
+      wordCount: essay.wordCount,
+      storageSizeKb,
+    });
 
     const { data, error } = await supabase
       .from('essays')
@@ -36,15 +104,16 @@ export function useCloudSync() {
         user_id: user.id,
         exam_type: essay.examType,
         topic: essay.topic,
-        essay_text: essay.essayText,
+        essay_text: essay.essayText, // Always include essay_text
         word_count: essay.wordCount,
         ai_score: essay.aiScore,
         ai_feedback: essay.aiFeedback,
         local_id: essay.localId,
         created_at: essay.createdAt,
         updated_at: essay.updatedAt,
+        storage_size_kb: storageSizeKb, // Set storage size (trigger will also calculate)
         institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
-        institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null
+        institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null,
       })
       .select('id')
       .single();
@@ -54,21 +123,60 @@ export function useCloudSync() {
       return null;
     }
 
+    console.log('Draft saved to cloud:', essay.essayText?.length || 0, 'characters');
     return data?.id || null;
-  }, [user, isOnline, activeMembership, activeInstitution]);
+  }, [user, isOnline, activeMembership, activeInstitution, getUserStorageUsage, toast]);
 
   const updateCloudEssay = useCallback(async (cloudId: string, essay: LocalEssay): Promise<boolean> => {
     if (!user || !isOnline) return false;
+
+    // Calculate new size
+    const essayTextSize = new Blob([essay.essayText || '']).size;
+    
+    // Get current essay to calculate size difference
+    const { data: currentEssay } = await supabase
+      .from('essays')
+      .select('content_size')
+      .eq('id', cloudId)
+      .single();
+
+    const currentSize = currentEssay?.content_size || 0;
+    const sizeDifference = essayTextSize - currentSize;
+
+    // Check storage limit
+    if (sizeDifference > 0) {
+      const currentUsage = await getUserStorageUsage();
+      const newUsage = currentUsage + sizeDifference;
+
+      if (newUsage > STORAGE_LIMIT_BYTES) {
+        const usedMb = (currentUsage / (1024 * 1024)).toFixed(2);
+        const limitMb = (STORAGE_LIMIT_BYTES / (1024 * 1024)).toFixed(0);
+        
+        toast({
+          title: 'Storage limit reached',
+          description: `You've used ${usedMb} MB of ${limitMb} MB. Delete old drafts to continue.`,
+          variant: 'destructive',
+        });
+        return false;
+      }
+    }
+
+    console.log('Cloud Sync Payload (Update):', {
+      examType: essay.examType,
+      essayTextLength: essay.essayText?.length || 0,
+      wordCount: essay.wordCount,
+    });
 
     const { error } = await supabase
       .from('essays')
       .update({
         topic: essay.topic,
-        essay_text: essay.essayText,
+        essay_text: essay.essayText, // Always include essay_text
         word_count: essay.wordCount,
         ai_score: essay.aiScore,
         ai_feedback: essay.aiFeedback,
         updated_at: essay.updatedAt
+        // content_size will be auto-calculated by trigger
       })
       .eq('id', cloudId)
       .eq('user_id', user.id);
@@ -79,7 +187,7 @@ export function useCloudSync() {
     }
 
     return true;
-  }, [user, isOnline]);
+  }, [user, isOnline, getUserStorageUsage, toast]);
 
   const deleteCloudEssay = useCallback(async (cloudId: string): Promise<boolean> => {
     if (!user || !isOnline) return false;
@@ -95,6 +203,25 @@ export function useCloudSync() {
       return false;
     }
 
+    console.log('Deleted essay from cloud:', cloudId);
+    return true;
+  }, [user, isOnline]);
+
+  const deleteCloudEssays = useCallback(async (cloudIds: string[]): Promise<boolean> => {
+    if (!user || !isOnline || cloudIds.length === 0) return false;
+
+    const { error } = await supabase
+      .from('essays')
+      .delete()
+      .in('id', cloudIds)
+      .eq('user_id', user.id);
+
+    if (error) {
+      console.error('Error deleting cloud essays:', error);
+      return false;
+    }
+
+    console.log('Deleted essays from cloud:', cloudIds.length);
     return true;
   }, [user, isOnline]);
 
@@ -130,12 +257,17 @@ export function useCloudSync() {
               syncedAt: new Date().toISOString()
             });
           } else if (cloudDate > localDate) {
-            // Cloud is newer, update local
+            // Cloud is newer, update local - ALWAYS include essay_text
+            console.log('Cloud essay loaded:', {
+              id: cloud.id,
+              essayTextLength: cloud.essay_text?.length || 0,
+              wordCount: cloud.word_count || 0,
+            });
             mergedEssays.push({
               localId: local.localId,
               examType: cloud.exam_type as LocalEssay['examType'],
               topic: cloud.topic || '',
-              essayText: cloud.essay_text || '',
+              essayText: cloud.essay_text || '', // Always include essay_text
               createdAt: cloud.created_at,
               updatedAt: cloud.updated_at,
               wordCount: cloud.word_count || 0,
@@ -171,11 +303,16 @@ export function useCloudSync() {
           if (!alreadyInLocal) {
             // Generate a local_id if it doesn't exist
             const localId = cloud.local_id || crypto.randomUUID();
+            console.log('Cloud essay loaded (new):', {
+              id: cloud.id,
+              essayTextLength: cloud.essay_text?.length || 0,
+              wordCount: cloud.word_count || 0,
+            });
             mergedEssays.push({
               localId,
               examType: cloud.exam_type as LocalEssay['examType'],
               topic: cloud.topic || '',
-              essayText: cloud.essay_text || '',
+              essayText: cloud.essay_text || '', // Always include essay_text
               createdAt: cloud.created_at,
               updatedAt: cloud.updated_at,
               wordCount: cloud.word_count || 0,
@@ -206,6 +343,8 @@ export function useCloudSync() {
     uploadEssay,
     updateCloudEssay,
     deleteCloudEssay,
-    fetchCloudEssays
+    deleteCloudEssays,
+    fetchCloudEssays,
+    getUserStorageUsage
   };
 }

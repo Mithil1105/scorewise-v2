@@ -1193,6 +1193,7 @@ export function AssignmentManager() {
                 <TableHead>Type</TableHead>
                 <TableHead>Batch</TableHead>
                 <TableHead>Due Date</TableHead>
+                <TableHead>Date Created</TableHead>
                 <TableHead>Submissions</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -1209,7 +1210,7 @@ export function AssignmentManager() {
                   return (
                     <React.Fragment key={item.groupId || `group-${index}`}>
                       <TableRow className="bg-muted/30">
-                        <TableCell colSpan={6} className="font-semibold">
+                        <TableCell colSpan={7} className="font-semibold">
                           <div className="flex items-center gap-2">
                             <Users className="h-4 w-4" />
                             {groupName} ({groupAssignments.length} tasks)
@@ -1288,6 +1289,17 @@ export function AssignmentManager() {
                             ) : (
                               <span className="text-muted-foreground">No deadline</span>
                             )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1 text-sm">
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3 text-muted-foreground" />
+                                <span>{format(new Date(assignment.created_at), 'MMM d, yyyy')}</span>
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                {format(new Date(assignment.created_at), 'h:mm a')}
+                              </span>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Badge variant="secondary">
@@ -1396,6 +1408,17 @@ export function AssignmentManager() {
                       ) : (
                         <span className="text-muted-foreground">No deadline</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1 text-sm">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3 text-muted-foreground" />
+                          <span>{format(new Date(assignment.created_at), 'MMM d, yyyy')}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {format(new Date(assignment.created_at), 'h:mm a')}
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">

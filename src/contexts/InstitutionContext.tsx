@@ -77,7 +77,7 @@ export function InstitutionProvider({ children }: { children: ReactNode }) {
         .from('institution_members')
         .select(`
           *,
-          institution:institutions(*)
+          institution:institutions(id, name, code, owner_user_id, logo_url, theme_color, plan, is_active, created_at, updated_at)
         `)
         .eq('user_id', user.id);
 
@@ -98,6 +98,7 @@ export function InstitutionProvider({ children }: { children: ReactNode }) {
         const stored = membershipData.find(m => m.id === storedMembershipId && m.status === 'active');
         if (stored) {
           setActiveMembershipState(stored);
+          // Always update activeInstitution with fresh data from the database
           setActiveInstitution(stored.institution || null);
           activeMembershipSet = true;
         } else {
@@ -119,6 +120,15 @@ export function InstitutionProvider({ children }: { children: ReactNode }) {
         setActiveMembershipState(null);
         setActiveInstitution(null);
         localStorage.removeItem('activeInstitutionMembershipId');
+      }
+      
+      // If we already have an active membership, refresh its institution data
+      // This ensures branding updates are reflected immediately
+      if (activeMembershipSet && storedMembershipId) {
+        const currentActive = membershipData.find(m => m.id === storedMembershipId && m.status === 'active');
+        if (currentActive && currentActive.institution) {
+          setActiveInstitution(currentActive.institution);
+        }
       }
     } catch (err) {
       console.error('Error fetching memberships:', err);

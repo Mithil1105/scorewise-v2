@@ -24,6 +24,8 @@ import { useInstitution } from "@/contexts/InstitutionContext";
 import { useImageUpload } from "@/hooks/useImageUpload";
 import { LocalEssay, LocalImage } from "@/types/essay";
 import { supabase } from "@/integrations/supabase/client";
+import { getRemainingStorage, calculateStorageSizeKb } from "@/utils/storageUsage";
+import { SubmitSuccessDialog } from "@/components/essay/SubmitSuccessDialog";
 
 const STORAGE_KEY = "scorewise_ielts_task1_draft";
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -54,6 +56,7 @@ const IELTSTask1 = () => {
   const [wpm, setWpm] = useState(0);
   const [currentLocalId, setCurrentLocalId] = useState<string | null>(null);
   const [imageZoom, setImageZoom] = useState(100);
+  const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
@@ -61,7 +64,7 @@ const IELTSTask1 = () => {
 
   const { essays, saveEssays, addEssay, updateEssay, getEssay } = useLocalEssays();
   const { images, addImage, getImagesForEssay } = useLocalImages();
-  const { syncEssays, uploadEssay } = useCloudSync();
+  const { uploadEssay } = useCloudSync();
   const { user, isOnline } = useAuth();
   const { activeMembership } = useInstitution();
   const { uploadImage, uploading, progress: uploadProgress } = useImageUpload();
@@ -117,9 +120,30 @@ const IELTSTask1 = () => {
         return; // No essay text to submit
       }
 
-      // Ensure essay is saved to cloud first
+      // Check storage limit before upload
+      const storageSizeKb = calculateStorageSizeKb(essay);
+      if (user && isOnline) {
+        const { remaining } = await getRemainingStorage(supabase, user.id);
+        if (remaining < storageSizeKb) {
+          toast({
+            title: "Storage limit exceeded",
+            description: "You've used 5MB of storage. Delete old drafts to continue.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Ensure essay is saved to cloud first (only on submit, not auto-sync)
       let essayId = updatedEssay.cloudId;
       if (!essayId && user && isOnline) {
+        console.log("Cloud Upload Payload (Task 1 Assignment):", {
+          examType: updatedEssay.examType,
+          topic: updatedEssay.topic,
+          essayTextLength: updatedEssay.essayText.length,
+          wordCount: updatedEssay.wordCount,
+          storageSizeKb,
+        });
         // Upload essay to cloud
         essayId = await uploadEssay(updatedEssay);
         if (essayId) {
@@ -181,6 +205,60 @@ const IELTSTask1 = () => {
       });
     }
   }, [assignmentData, activeMembership, currentLocalId, essay, getEssay, user, isOnline, uploadEssay, updateEssay, toast]);
+
+  // Submit essay to cloud (only on final submit, not auto-sync)
+  const handleSubmitEssay = useCallback(async () => {
+    if (!essay.trim() || !currentLocalId || !user || !isOnline) {
+      return;
+    }
+
+    try {
+      const currentEssayData = getEssay(currentLocalId);
+      if (!currentEssayData) return;
+
+      const updatedEssay = {
+        ...currentEssayData,
+        essayText: essay,
+        wordCount: essay.trim() ? essay.trim().split(/\s+/).length : 0,
+        updatedAt: new Date().toISOString()
+      };
+      updateEssay(currentLocalId, updatedEssay);
+
+      // Check storage limit
+      const storageSizeKb = calculateStorageSizeKb(essay);
+      const { remaining } = await getRemainingStorage(supabase, user.id);
+
+      if (remaining < storageSizeKb) {
+        toast({
+          title: "Storage limit exceeded",
+          description: "You've used 5MB of storage. Delete old drafts to continue.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log("Cloud Upload Payload (Task 1):", {
+        examType: updatedEssay.examType,
+        topic: updatedEssay.topic,
+        essayTextLength: updatedEssay.essayText.length,
+        wordCount: updatedEssay.wordCount,
+        storageSizeKb,
+      });
+
+      const cloudId = await uploadEssay(updatedEssay);
+      if (cloudId) {
+        updateEssay(currentLocalId, { cloudId });
+        setShowSubmitSuccess(true);
+      }
+    } catch (err: any) {
+      console.error('Error submitting essay:', err);
+      toast({
+        title: 'Submission error',
+        description: err.message || 'Failed to submit essay. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  }, [essay, currentLocalId, user, isOnline, getEssay, updateEssay, uploadEssay, toast]);
 
   // Timer effect
   useEffect(() => {
@@ -444,6 +522,8 @@ const IELTSTask1 = () => {
     setTimeLeft(20 * 60);
     setStartTime(null);
     setWpm(0);
+    setEssay("");
+    setShowResults(false);
   }, []);
 
   const handleExport = useCallback(async () => {
@@ -481,13 +561,17 @@ const IELTSTask1 = () => {
     setShowResults(true);
     forceSave();
 
-    if (user && isOnline) {
-      await syncEssays(essays, saveEssays);
+    // For non-assignment essays, offer to submit to cloud (only on submit, not auto-sync)
+    if (!assignmentData?.isAssignment) {
+      await handleSubmitEssay();
+    } else {
+      await submitAssignmentEssay();
     }
 
-    // Auto-submit if this is an assignment
-    await submitAssignmentEssay();
-  }, [forceSave, user, isOnline, essays, saveEssays, syncEssays, submitAssignmentEssay]);
+    // Clear essay text for next draft
+    setEssay("");
+    setCurrentLocalId(null);
+  }, [forceSave, handleSubmitEssay, submitAssignmentEssay, assignmentData]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -776,9 +860,9 @@ const IELTSTask1 = () => {
                   ref={textareaRef}
                   value={essay}
                   onChange={(e) => setEssay(e.target.value)}
-                  placeholder="Start writing your response here..."
+                  placeholder={isRunning ? "Start writing your response here..." : "Click 'Start' to begin writing..."}
                   className="h-full w-full text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50 border-0 rounded-none"
-                  disabled={showResults}
+                  disabled={showResults || !isRunning}
                   spellCheck={false}
                   autoComplete="off"
                   autoCorrect="off"
@@ -797,9 +881,9 @@ const IELTSTask1 = () => {
               ref={textareaRef}
               value={essay}
               onChange={(e) => setEssay(e.target.value)}
-              placeholder="Start writing your response here..."
-              className="min-h-[400px] md:min-h-[450px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
-              disabled={showResults}
+              placeholder={isRunning ? "Start writing your response here..." : "Click 'Start' to begin writing..."}
+              className="min-h-[500px] md:min-h-[600px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
+              disabled={showResults || !isRunning}
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"
@@ -890,6 +974,12 @@ const IELTSTask1 = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Submit Success Dialog */}
+      <SubmitSuccessDialog
+        open={showSubmitSuccess}
+        onOpenChange={setShowSubmitSuccess}
+      />
     </PageLayout>
   );
 };
