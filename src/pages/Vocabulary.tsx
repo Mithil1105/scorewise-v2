@@ -1,32 +1,57 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { VocabCard } from "@/components/vocab/VocabCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { vocabularyList, searchVocabulary } from "@/data/vocabulary";
-import { Search, X } from "lucide-react";
+import { vocabularyList, searchVocabulary, loadVocabulary, VocabWord } from "@/data/vocabulary";
+import { Search, X, Loader2 } from "lucide-react";
 
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 const Vocabulary = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+  const [words, setWords] = useState<VocabWord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadWords = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const loadedWords = await loadVocabulary();
+        if (loadedWords.length === 0) {
+          setError('No vocabulary words loaded. Please check if Verbalhelp.json exists in the public folder.');
+        } else {
+          setWords(loadedWords);
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load vocabulary';
+        setError(errorMessage);
+        console.error('Error loading vocabulary:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadWords();
+  }, []);
 
   const filteredWords = useMemo(() => {
-    let words = vocabularyList;
+    let filtered = words;
 
     if (searchQuery) {
-      words = searchVocabulary(searchQuery);
+      filtered = searchVocabulary(searchQuery, words);
     } else if (selectedLetter) {
-      words = words.filter(w => w.word.toUpperCase().startsWith(selectedLetter));
+      filtered = filtered.filter(w => w.word.toUpperCase().startsWith(selectedLetter));
     }
 
-    return words;
-  }, [searchQuery, selectedLetter]);
+    return filtered;
+  }, [searchQuery, selectedLetter, words]);
 
   const availableLetters = useMemo(() => {
-    return new Set(vocabularyList.map(w => w.word[0].toUpperCase()));
-  }, []);
+    return new Set(words.map(w => w.word[0].toUpperCase()));
+  }, [words]);
 
   const handleClearFilters = () => {
     setSearchQuery("");
@@ -102,33 +127,55 @@ const Vocabulary = () => {
           </div>
         </div>
 
-        {/* Word Count */}
-        <div className="mb-4 text-sm text-muted-foreground">
-          Showing {filteredWords.length} of {vocabularyList.length} words
-        </div>
-
-        {/* Word Grid */}
-        {filteredWords.length > 0 ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredWords.map((word) => (
-              <VocabCard key={word.id} word={word} />
-            ))}
+        {/* Loading State */}
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="ml-3 text-muted-foreground">Loading vocabulary...</span>
           </div>
-        ) : (
+        ) : error ? (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No words found matching your search.</p>
-            <Button onClick={handleClearFilters} variant="link" className="mt-2">
-              Clear filters
+            <p className="text-destructive mb-2">Error loading vocabulary</p>
+            <p className="text-sm text-muted-foreground mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()} variant="outline">
+              Reload Page
             </Button>
           </div>
-        )}
+        ) : (
+          <>
+            {/* Word Count */}
+            <div className="mb-4 text-sm text-muted-foreground">
+              Showing {filteredWords.length} of {words.length} words
+            </div>
 
-        {/* Info Note */}
-        <div className="mt-8 p-4 bg-vocab/10 rounded-lg border border-vocab/20 text-center">
-          <p className="text-sm text-muted-foreground">
-            Full vocabulary list with 500+ high-frequency words coming soon!
-          </p>
-        </div>
+            {/* Word Grid */}
+            {filteredWords.length > 0 ? (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredWords.map((word) => (
+                  <VocabCard 
+                    key={word.id} 
+                    word={word} 
+                    filteredWords={filteredWords}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">No words found matching your search.</p>
+                <Button onClick={handleClearFilters} variant="link" className="mt-2">
+                  Clear filters
+                </Button>
+              </div>
+            )}
+
+            {/* Info Note */}
+            <div className="mt-8 p-4 bg-vocab/10 rounded-lg border border-vocab/20 text-center">
+              <p className="text-sm text-muted-foreground">
+                Complete vocabulary list with {words.length} high-frequency GRE words from Verbalhelp.json
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </PageLayout>
   );

@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import Essay from "./pages/Essay";
 import Typing from "./pages/Typing";
 import Vocabulary from "./pages/Vocabulary";
+import WordDetail from "./pages/WordDetail";
 import IELTSHome from "./pages/IELTSHome";
 import IELTSTask1 from "./pages/IELTSTask1";
 import IELTSTask2 from "./pages/IELTSTask2";
@@ -64,6 +65,7 @@ const App = () => (
               <Route path="/essay" element={<Essay />} />
               <Route path="/typing" element={<Typing />} />
               <Route path="/vocabulary" element={<Vocabulary />} />
+              <Route path="/vocabulary/word/:wordId" element={<WordDetail />} />
               <Route path="/ielts" element={<IELTSHome />} />
               <Route path="/ielts/task1" element={<IELTSTask1 />} />
               <Route path="/ielts/task2" element={<IELTSTask2 />} />
