@@ -4,8 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export default function Terms() {
   return (
-    <PageLayout showNav={false}>
-      <TopBar title="Terms & Conditions" showDraftsButton={false} />
+    <PageLayout showNav={true}>
+      <TopBar title="Terms & Conditions" showDraftsButton={false} showBackButton={true} />
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold mb-4">Terms & Conditions</h1>

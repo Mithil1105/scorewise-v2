@@ -2,17 +2,56 @@ import { PageLayout } from "@/components/layout/PageLayout";
 import { TopBar } from "@/components/layout/TopBar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, Phone, Building2, Shield, HelpCircle } from "lucide-react";
+import { ContactForm } from "./ContactForm";
 
 export default function Contact() {
   return (
-    <PageLayout showNav={false}>
-      <TopBar title="Contact Us" showDraftsButton={false} />
+    <PageLayout showNav={true}>
+      <TopBar title="Contact Us" showDraftsButton={false} showBackButton={true} showContactButton={false} />
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold mb-4">Contact Us</h1>
           <p className="text-muted-foreground text-lg">
             We're here to help. Reach out to us for any inquiries, support, or partnership opportunities.
           </p>
+        </div>
+
+        {/* Contact Form */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Send Us a Message</CardTitle>
+            <CardDescription>
+              Fill out the form below and we'll get back to you as soon as possible.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ContactForm />
+          </CardContent>
+        </Card>
+
+        {/* Alternative Contact Methods */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-4">Or Contact Us Directly</h2>
+          <div className="grid md:grid-cols-2 gap-4 mb-6">
+            <div className="flex items-center gap-3 p-4 border rounded-lg">
+              <Mail className="h-5 w-5 text-primary" />
+              <div>
+                <p className="font-semibold">Email</p>
+                <a href="mailto:mithil20056mistry@gmail.com" className="text-sm text-primary hover:underline">
+                  mithil20056mistry@gmail.com
+                </a>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-4 border rounded-lg">
+              <Phone className="h-5 w-5 text-primary" />
+              <div>
+                <p className="font-semibold">Phone</p>
+                <a href="tel:+918238326605" className="text-sm text-primary hover:underline">
+                  +91 82383 26605
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="grid md:grid-cols-2 gap-6 mb-8">

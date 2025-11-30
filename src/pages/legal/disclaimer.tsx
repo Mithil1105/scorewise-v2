@@ -5,8 +5,8 @@ import { AlertTriangle } from "lucide-react";
 
 export default function Disclaimer() {
   return (
-    <PageLayout showNav={false}>
-      <TopBar title="Legal Disclaimer" showDraftsButton={false} />
+    <PageLayout showNav={true}>
+      <TopBar title="Legal Disclaimer" showDraftsButton={false} showBackButton={true} />
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold mb-4">Legal Disclaimer</h1>

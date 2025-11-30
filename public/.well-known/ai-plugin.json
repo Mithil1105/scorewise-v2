@@ -1,0 +1,10 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "ScoreWise",
+  "name_for_model": "scorewise_essay_engine",
+  "description_for_human": "AI-powered GRE/IELTS essay scoring with teacher dashboards.",
+  "description_for_model": "ScoreWise is a writing evaluation SaaS providing instant AI feedback and teacher corrections for GRE and IELTS writing tasks.",
+  "contact_email": "support@byteosaurus.tech",
+  "legal_info_url": "https://scorewise.mithilmistry.tech/terms"
+}
+

@@ -42,6 +42,7 @@ import Privacy from "./pages/legal/privacy";
 import Terms from "./pages/legal/terms";
 import Cookies from "./pages/legal/cookies";
 import Disclaimer from "./pages/legal/disclaimer";
+import FAQs from "./pages/legal/FAQs";
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 
 const queryClient = new QueryClient();
@@ -71,6 +72,7 @@ const App = () => (
               
               {/* Legal Pages */}
               <Route path="/contact" element={<Contact />} />
+              <Route path="/faqs" element={<FAQs />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/cookies" element={<Cookies />} />

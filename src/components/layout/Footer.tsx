@@ -133,6 +133,15 @@ export function Footer() {
               </li>
               <li>
                 <Link 
+                  to="/faqs" 
+                  className="text-muted-foreground hover:text-primary transition-colors flex items-center gap-2"
+                >
+                  <HelpCircle className="h-4 w-4" />
+                  FAQs
+                </Link>
+              </li>
+              <li>
+                <Link 
                   to="/privacy" 
                   className="text-muted-foreground hover:text-primary transition-colors flex items-center gap-2"
                 >
@@ -204,10 +213,10 @@ export function Footer() {
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
             <div className="text-center md:text-left">
               <p className="mb-1">
-                © {currentYear} <strong className="text-foreground">Byteosaurus</strong>. All rights reserved.
+                © {currentYear} <strong className="text-foreground">ScoreWise</strong> • Powered by <strong className="text-foreground">Byteosaurus</strong>
               </p>
-              <p>
-                Built by <strong className="text-foreground">Mithil Mistry & Hasti Vakani</strong>
+              <p className="text-xs text-muted-foreground italic">
+                We feel binary beating through our artery
               </p>
             </div>
             <div className="text-center md:text-right">
