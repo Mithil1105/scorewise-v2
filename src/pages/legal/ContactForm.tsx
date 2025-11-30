@@ -33,34 +33,30 @@ export function ContactForm({ onSuccess }: ContactFormProps) {
     setIsSubmitting(true);
 
     try {
-      // First, try to save to Supabase table
-      const { error: dbError } = await supabase
-        .from("contact_messages")
-        .insert({
+      // Call the Supabase Edge Function to send email
+      // Contact form is public, so no authentication required
+      const { data, error } = await supabase.functions.invoke("send-contact-email", {
+        body: {
           name: formData.name,
           email: formData.email,
           role: formData.role,
           message: formData.message,
-          created_at: new Date().toISOString(),
-        });
+        },
+      });
 
-      if (dbError) {
-        // If table doesn't exist, log error but continue with email
-        console.warn("Could not save to database:", dbError);
+      if (error) {
+        throw error;
       }
 
-      // Send email (using mailto as fallback, or you can integrate Resend API)
-      const subject = encodeURIComponent(`Contact Form: ${formData.role} - ${formData.name}`);
-      const body = encodeURIComponent(
-        `Name: ${formData.name}\nEmail: ${formData.email}\nRole: ${formData.role}\n\nMessage:\n${formData.message}`
-      );
-      
-      // Open email client
-      window.location.href = `mailto:mithil20056mistry@gmail.com?subject=${subject}&body=${body}`;
+      if (data?.error) {
+        throw new Error(data.error);
+      }
 
       toast({
         title: "Message sent successfully!",
-        description: "Our team will reply soon. We've also opened your email client.",
+        description: data?.emailSent 
+          ? "Your message has been sent. Our team will reply soon."
+          : "Your message has been saved. Our team will be notified.",
       });
 
       // Reset form
@@ -70,7 +66,7 @@ export function ContactForm({ onSuccess }: ContactFormProps) {
       console.error("Error submitting form:", error);
       toast({
         title: "Error",
-        description: "Failed to send message. Please try again or email us directly.",
+        description: error.message || "Failed to send message. Please try again or email us directly at mithil20056mistry@gmail.com",
         variant: "destructive",
       });
     } finally {

@@ -16,7 +16,7 @@ export default function ProtectedRoute({
   requireInstitution = false
 }: ProtectedRouteProps) {
   const { user, loading: authLoading } = useAuth();
-  const { loading: institutionLoading } = useInstitution();
+  const { activeMembership, loading: institutionLoading } = useInstitution();
   const navigate = useNavigate();
   const location = useLocation();
 

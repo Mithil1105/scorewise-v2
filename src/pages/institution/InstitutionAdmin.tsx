@@ -78,15 +78,17 @@ export default function InstitutionAdmin() {
       return;
     }
 
-    // Give a small delay to allow institution context to restore from localStorage
-    // This prevents race conditions where activeMembership might be null temporarily
+    // Wait for institution context to fully load and restore from localStorage
+    // The context should have restored by now, but give it a moment
     if (!activeMembership) {
-      // Wait a bit longer - institution context might still be restoring
+      // Check if we have any memberships at all - if yes, wait a bit more
+      // If no memberships exist, redirect immediately
       const timeout = setTimeout(() => {
+        // Double-check after timeout - context might have restored
         if (!activeMembership) {
           navigate('/access-denied');
         }
-      }, 1000); // Give 1 second for context to restore
+      }, 500); // Reduced to 500ms - should be enough for localStorage restore
       return () => clearTimeout(timeout);
     }
 
@@ -98,7 +100,7 @@ export default function InstitutionAdmin() {
 
     // If we have valid access, fetch members
     if (activeMembership && activeMembership.role === 'inst_admin' && activeMembership.status === 'active') {
-      fetchMembers();
+    fetchMembers();
       fetchRecentGrades();
       fetchAllEssays();
       fetchAllAssignments();
@@ -122,10 +124,10 @@ export default function InstitutionAdmin() {
       let profiles = [];
       if (userIds.length > 0) {
         const { data: profilesData, error: profilesError } = await supabase
-          .from('profiles')
-          .select('user_id, display_name, avatar_url')
-          .in('user_id', userIds);
-        
+        .from('profiles')
+        .select('user_id, display_name, avatar_url')
+        .in('user_id', userIds);
+
         if (profilesError) {
           console.error('Error fetching profiles:', profilesError);
         } else {

@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ExternalLink,
   Building2,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ const menuItems = [
   { icon: BookOpen, label: 'Vocabulary', path: '/admin/vocabulary' },
   { icon: Users, label: 'User Manager', path: '/admin/users' },
   { icon: Building2, label: 'Institutions', path: '/admin/institutions' },
+  { icon: Mail, label: 'Contact Inquiries', path: '/admin/contact-inquiries' },
   { icon: Cpu, label: 'AI Controls', path: '/admin/ai-controls' },
   { icon: MessageSquare, label: 'Peer Feedback', path: '/admin/feedback' },
 ];

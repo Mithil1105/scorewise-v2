@@ -29,6 +29,7 @@ import UserManager from "./pages/admin/UserManager";
 import AIControls from "./pages/admin/AIControls";
 import FeedbackManager from "./pages/admin/FeedbackManager";
 import InstitutionsManager from "./pages/admin/InstitutionsManager";
+import ContactInquiries from "./pages/admin/ContactInquiries";
 import InstitutionAdmin from "./pages/institution/InstitutionAdmin";
 import StudentDashboard from "./pages/institution/StudentDashboard";
 import TeacherDashboard from "./pages/institution/TeacherDashboard";
@@ -171,6 +172,11 @@ const App = () => (
               <Route path="/admin/institutions" element={
                 <ProtectedRoute>
                   <InstitutionsManager />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/contact-inquiries" element={
+                <ProtectedRoute>
+                  <ContactInquiries />
                 </ProtectedRoute>
               } />
               

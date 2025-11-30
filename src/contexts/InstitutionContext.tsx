@@ -52,13 +52,18 @@ function generateInstitutionCode(): string {
 }
 
 export function InstitutionProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [memberships, setMemberships] = useState<InstitutionMember[]>([]);
   const [activeMembership, setActiveMembershipState] = useState<InstitutionMember | null>(null);
   const [activeInstitution, setActiveInstitution] = useState<Institution | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchMemberships = async () => {
+    // Wait for auth to finish loading before proceeding
+    if (authLoading) {
+      return; // Auth is still loading, don't fetch yet
+    }
+
     if (!user) {
       setMemberships([]);
       setActiveMembershipState(null);
@@ -124,7 +129,7 @@ export function InstitutionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     fetchMemberships();
-  }, [user]);
+  }, [user, authLoading]);
 
   const setActiveMembership = (membership: InstitutionMember | null) => {
     setActiveMembershipState(membership);

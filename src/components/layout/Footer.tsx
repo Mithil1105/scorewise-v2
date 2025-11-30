@@ -11,7 +11,8 @@ import {
   Shield,
   FileText,
   Cookie,
-  AlertTriangle
+  AlertTriangle,
+  HelpCircle
 } from "lucide-react";
 
 export function Footer() {

@@ -409,14 +409,14 @@ export function AssignmentManager() {
     }
     
     // Validate assignment
-    if (!newAssignment.title.trim()) {
-      toast({ title: 'Error', description: 'Please enter an assignment title', variant: 'destructive' });
-      return;
-    }
-    
-    if (!newAssignment.topic.trim()) {
-      toast({ title: 'Error', description: 'Please enter or select a topic', variant: 'destructive' });
-      return;
+      if (!newAssignment.title.trim()) {
+        toast({ title: 'Error', description: 'Please enter an assignment title', variant: 'destructive' });
+        return;
+      }
+      
+      if (!newAssignment.topic.trim()) {
+        toast({ title: 'Error', description: 'Please enter or select a topic', variant: 'destructive' });
+        return;
     }
     
     setSaving(true);
@@ -516,19 +516,19 @@ export function AssignmentManager() {
       toast({ title: 'Assignment created!', description: 'Students can now see and submit this assignment.' });
       
       // Reset form
-        const resetForm = {
-          title: '',
-          topic: '',
-          exam_type: 'GRE',
-          task_type: '',
-          instructions: '',
-          due_date: '',
-          due_time: '',
-          batch_id: '',
-          use_predefined_topic: false,
-          selected_topic_id: '',
+      const resetForm = {
+        title: '',
+        topic: '',
+        exam_type: 'GRE',
+        task_type: '',
+        instructions: '',
+        due_date: '',
+        due_time: '',
+        batch_id: '',
+        use_predefined_topic: false,
+        selected_topic_id: '',
           image_url: ''
-        };
+      };
       setNewAssignment(resetForm);
       setSelectedDate(undefined);
       setImageFile(null);
@@ -865,7 +865,7 @@ export function AssignmentManager() {
                   </div>
                   
                   {/* Topic & Details Section */}
-                  <div className="space-y-4 pt-4 border-t">
+                    <div className="space-y-4 pt-4 border-t">
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"

@@ -25,11 +25,5 @@ WITH CHECK (true);
 CREATE POLICY "Admins can view contact messages"
 ON public.contact_messages FOR SELECT
 TO authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE profiles.id = auth.uid()
-    AND profiles.role = 'admin'
-  )
-);
+USING (public.has_role(auth.uid(), 'admin'::app_role));
 
