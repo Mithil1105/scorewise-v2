@@ -170,14 +170,8 @@ const IELTSTask1 = () => {
 
       toast({
         title: 'Task 1 submitted!',
-        description: assignmentData.isClubbed
-          ? 'Task 1 submitted! Moving to Task 2...'
-          : 'Your essay has been automatically submitted to your teacher.',
+        description: 'Your essay has been automatically submitted to your teacher.',
       });
-
-      // If this is a clubbed assignment, navigate to Task 2
-      if (assignmentData.isClubbed && assignmentData.groupId) {
-      }
     } catch (err: any) {
       console.error('Error submitting assignment:', err);
       toast({
@@ -226,7 +220,7 @@ const IELTSTask1 = () => {
       // Create assignment-based question
       const assignmentQuestion: IELTSTask1Question = {
         id: assignmentData.assignmentId || 'assignment',
-        type: 'assignment',
+        type: 'bar-chart', // Default type for assignments
         title: assignmentData.assignmentTitle || 'Assignment',
         description: assignmentData.assignmentTopic,
         instructions: assignmentData.assignmentInstructions || "Complete the assignment as instructed."
@@ -249,8 +243,7 @@ const IELTSTask1 = () => {
         essayText: '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        wordCount: 0,
-        assignmentId: assignmentData.assignmentId
+        wordCount: 0
       };
       addEssay(newEssay);
       setCurrentLocalId(localId);
@@ -786,6 +779,13 @@ const IELTSTask1 = () => {
                   placeholder="Start writing your response here..."
                   className="h-full w-full text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50 border-0 rounded-none"
                   disabled={showResults}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  data-gramm="false"
+                  data-gramm_editor="false"
+                  data-enable-grammarly="false"
                 />
               </div>
             </div>
@@ -800,6 +800,13 @@ const IELTSTask1 = () => {
               placeholder="Start writing your response here..."
               className="min-h-[400px] md:min-h-[450px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
               disabled={showResults}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-enable-grammarly="false"
             />
           </div>
         )}

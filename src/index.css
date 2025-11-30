@@ -137,6 +137,49 @@
     @apply font-mono text-4xl font-bold tracking-wider;
   }
 
+  /* Disable spellcheck and grammar extensions for all writing sections */
+  .essay-editor,
+  textarea[spellcheck="false"],
+  textarea[data-gramm="false"] {
+    /* Disable browser spellcheck */
+    -webkit-user-modify: read-write-plaintext-only;
+    /* Disable Grammarly and other extensions */
+    --grammarly-editor-plugin: none !important;
+  }
+
+  /* Hide Grammarly and other grammar extension UI */
+  [data-gramm="false"] *,
+  [data-gramm_editor="false"] *,
+  [data-enable-grammarly="false"] * {
+    --grammarly-editor-plugin: none !important;
+  }
+
+  /* Disable browser autocomplete and autocorrect */
+  textarea[spellcheck="false"] {
+    -webkit-autocorrect: off;
+    -webkit-autocapitalize: off;
+    autocorrect: off;
+    autocapitalize: off;
+  }
+
+  /* Global: Disable Grammarly and other grammar extensions on all textareas in writing sections */
+  .essay-editor,
+  textarea.essay-editor,
+  textarea[data-gramm="false"] {
+    /* Prevent Grammarly from attaching */
+    --grammarly-shadow-root: none !important;
+  }
+
+  /* Hide any Grammarly UI that might still appear */
+  grammarly-desktop-integration,
+  [data-grammarly-shadow-root],
+  .grammarly-shadow-root {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
   .essay-editor {
     @apply w-full min-h-[60vh] p-6 text-lg leading-relaxed bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none;
     font-family: 'Georgia', serif;

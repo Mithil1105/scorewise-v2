@@ -440,6 +440,10 @@ const Essay = () => {
               onChange={(e) => setCustomTopic(e.target.value)}
               placeholder="Or enter your own topic..."
               className="resize-none h-20"
+              spellCheck={false}
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-enable-grammarly="false"
             />
             <Button 
               onClick={handleUseCustomTopic} 
@@ -481,6 +485,13 @@ const Essay = () => {
             placeholder="Start typing your essay here..."
             className="essay-editor"
             disabled={showResults}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            data-gramm="false"
+            data-gramm_editor="false"
+            data-enable-grammarly="false"
           />
         </div>
 

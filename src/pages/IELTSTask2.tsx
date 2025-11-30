@@ -408,6 +408,10 @@ const IELTSTask2 = () => {
             onChange={(e) => setCustomTopic(e.target.value)}
             placeholder="Or enter your own topic..."
             className="resize-none h-20"
+            spellCheck={false}
+            data-gramm="false"
+            data-gramm_editor="false"
+            data-enable-grammarly="false"
           />
           <Button 
             onClick={handleUseCustomTopic} 
@@ -509,6 +513,10 @@ const IELTSTask2 = () => {
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Jot down your ideas, structure, key points..."
               className="resize-none h-24 bg-muted/50 text-sm"
+              spellCheck={false}
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-enable-grammarly="false"
             />
           </CollapsibleContent>
         </Collapsible>
@@ -522,6 +530,13 @@ const IELTSTask2 = () => {
             placeholder="Start writing your essay here..."
             className="essay-editor"
             disabled={showResults}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            data-gramm="false"
+            data-gramm_editor="false"
+            data-enable-grammarly="false"
           />
         </div>
 
