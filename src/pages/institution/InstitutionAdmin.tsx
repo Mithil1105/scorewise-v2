@@ -65,6 +65,24 @@ export default function InstitutionAdmin() {
   const [allAssignments, setAllAssignments] = useState<any[]>([]);
   const [loadingAssignments, setLoadingAssignments] = useState(false);
   const [assignmentsSearchTerm, setAssignmentsSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('overview');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // Auto-refresh data every 30 seconds
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(() => {
+      if (activeInstitution && activeMembership?.role === 'inst_admin') {
+        fetchMembers();
+        fetchRecentGrades();
+        fetchAllEssays();
+        fetchAllAssignments();
+      }
+    }, 30000); // Refresh every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [autoRefresh, activeInstitution, activeMembership]);
 
   useEffect(() => {
     // Wait for both loading states to complete before checking access
@@ -100,12 +118,27 @@ export default function InstitutionAdmin() {
 
     // If we have valid access, fetch members
     if (activeMembership && activeMembership.role === 'inst_admin' && activeMembership.status === 'active') {
-    fetchMembers();
+      fetchMembers();
       fetchRecentGrades();
       fetchAllEssays();
       fetchAllAssignments();
     }
   }, [user, activeMembership, authLoading, institutionLoading, navigate, activeInstitution]);
+
+  // Refetch data when tab changes to ensure fresh data
+  useEffect(() => {
+    if (activeInstitution && activeMembership?.role === 'inst_admin' && activeMembership.status === 'active') {
+      if (activeTab === 'grades') {
+        fetchRecentGrades();
+      } else if (activeTab === 'essays') {
+        fetchAllEssays();
+      } else if (activeTab === 'assignments') {
+        fetchAllAssignments();
+      } else if (activeTab === 'members') {
+        fetchMembers();
+      }
+    }
+  }, [activeTab, activeInstitution, activeMembership]);
 
   const fetchMembers = async () => {
     if (!activeInstitution) return;
@@ -456,10 +489,15 @@ export default function InstitutionAdmin() {
     }
   };
 
-  const filteredMembers = members.filter(m => 
-    m.profile?.display_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.email?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter members - if search is empty and we're on members tab, show all
+  // Otherwise filter by search term
+  const filteredMembers = members.filter(m => {
+    if (!searchTerm) return true; // Show all if no search
+    return (
+      m.profile?.display_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      m.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   // Filter recent grades based on search term
   const filteredGrades = recentGrades.filter(grade => {
@@ -559,7 +597,13 @@ export default function InstitutionAdmin() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card 
+            className="cursor-pointer hover:bg-muted/50 transition-colors"
+            onClick={() => {
+              setActiveTab('members');
+              setSearchTerm(''); // Clear search to show all active members
+            }}
+          >
             <CardHeader className="pb-2">
               <CardDescription>Active Members</CardDescription>
             </CardHeader>
@@ -569,13 +613,34 @@ export default function InstitutionAdmin() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card 
+            className={`cursor-pointer hover:bg-muted/50 transition-colors ${pendingCount > 0 ? 'ring-2 ring-amber-500/50' : ''}`}
+            onClick={() => {
+              setActiveTab('members');
+              // Filter to show only pending members
+              const pendingMembers = members.filter(m => m.status === 'pending');
+              if (pendingMembers.length > 0) {
+                // Set search to find pending members (we'll filter in the table)
+                setSearchTerm(''); // Clear search first
+                // Scroll to first pending member
+                setTimeout(() => {
+                  const firstPending = document.querySelector('[data-pending-member="true"]');
+                  firstPending?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 100);
+              }
+            }}
+          >
             <CardHeader className="pb-2">
               <CardDescription>Pending Requests</CardDescription>
             </CardHeader>
             <CardContent className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-amber-500" />
               <span className="text-2xl font-bold">{pendingCount}</span>
+              {pendingCount > 0 && (
+                <Badge variant="destructive" className="ml-2 animate-pulse">
+                  New
+                </Badge>
+              )}
             </CardContent>
           </Card>
 
@@ -592,13 +657,18 @@ export default function InstitutionAdmin() {
         </div>
 
         {/* Tabs for different sections */}
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 max-w-4xl">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-7 max-w-5xl">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <Building2 className="h-4 w-4" /> Overview
             </TabsTrigger>
-            <TabsTrigger value="members" className="flex items-center gap-2">
+            <TabsTrigger value="members" className="flex items-center gap-2 relative">
               <Users className="h-4 w-4" /> Members
+              {pendingCount > 0 && (
+                <Badge variant="destructive" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                  {pendingCount}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="grades" className="flex items-center gap-2">
               <Award className="h-4 w-4" /> Recent Marks
@@ -650,7 +720,11 @@ export default function InstitutionAdmin() {
                     </TableHeader>
                     <TableBody>
                       {filteredMembers.map((member) => (
-                        <TableRow key={member.id}>
+                        <TableRow 
+                          key={member.id}
+                          data-pending-member={member.status === 'pending' ? 'true' : undefined}
+                          className={member.status === 'pending' ? 'bg-amber-50 dark:bg-amber-950/20' : ''}
+                        >
                           <TableCell>
                             <div className="font-medium">
                               {member.profile?.display_name || 'Unknown User'}
@@ -755,25 +829,58 @@ export default function InstitutionAdmin() {
                   <CardDescription>Quick statistics and information</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div 
+                    className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => setActiveTab('members')}
+                  >
                     <span className="text-sm text-muted-foreground">Total Members</span>
                     <span className="text-2xl font-bold">{members.length}</span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div 
+                    className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => {
+                      setActiveTab('members');
+                      setSearchTerm(''); // Show all students
+                    }}
+                  >
                     <span className="text-sm text-muted-foreground">Active Students</span>
                     <span className="text-2xl font-bold">
                       {members.filter(m => m.role === 'student' && m.status === 'active').length}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div 
+                    className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => {
+                      setActiveTab('members');
+                      setSearchTerm(''); // Show all teachers
+                    }}
+                  >
                     <span className="text-sm text-muted-foreground">Teachers</span>
                     <span className="text-2xl font-bold">
                       {members.filter(m => m.role === 'teacher' && m.status === 'active').length}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div 
+                    className={`flex items-center justify-between p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors ${pendingCount > 0 ? 'ring-2 ring-amber-500/30' : ''}`}
+                    onClick={() => {
+                      setActiveTab('members');
+                      // Filter to show only pending members
+                      setSearchTerm(''); // Clear search first
+                      setTimeout(() => {
+                        const firstPending = document.querySelector('[data-pending-member="true"]');
+                        firstPending?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 100);
+                    }}
+                  >
                     <span className="text-sm text-muted-foreground">Pending Approvals</span>
-                    <span className="text-2xl font-bold text-amber-500">{pendingCount}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-bold text-amber-500">{pendingCount}</span>
+                      {pendingCount > 0 && (
+                        <Badge variant="destructive" className="animate-pulse">
+                          Action Required
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -785,26 +892,57 @@ export default function InstitutionAdmin() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start" onClick={() => {
-                    const membersTab = document.querySelector('[value="members"]') as HTMLElement;
-                    membersTab?.click();
-                  }}>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start hover:bg-primary/5 hover:border-primary transition-colors" 
+                    onClick={() => setActiveTab('members')}
+                  >
                     <Users className="h-4 w-4 mr-2" />
                     Manage Members
+                    {pendingCount > 0 && (
+                      <Badge variant="destructive" className="ml-auto">
+                        {pendingCount} pending
+                      </Badge>
+                    )}
                   </Button>
-                  <Button variant="outline" className="w-full justify-start" onClick={() => {
-                    const gradesTab = document.querySelector('[value="grades"]') as HTMLElement;
-                    gradesTab?.click();
-                  }}>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start hover:bg-primary/5 hover:border-primary transition-colors" 
+                    onClick={() => setActiveTab('grades')}
+                  >
                     <Award className="h-4 w-4 mr-2" />
                     View Recent Grades
+                    {filteredGrades.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto">
+                        {filteredGrades.length}
+                      </Badge>
+                    )}
                   </Button>
-                  <Button variant="outline" className="w-full justify-start" onClick={() => {
-                    const essaysTab = document.querySelector('[value="essays"]') as HTMLElement;
-                    essaysTab?.click();
-                  }}>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start hover:bg-primary/5 hover:border-primary transition-colors" 
+                    onClick={() => setActiveTab('essays')}
+                  >
                     <FileText className="h-4 w-4 mr-2" />
                     View All Essays
+                    {filteredEssays.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto">
+                        {filteredEssays.length}
+                      </Badge>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start hover:bg-primary/5 hover:border-primary transition-colors" 
+                    onClick={() => setActiveTab('assignments')}
+                  >
+                    <BookOpen className="h-4 w-4 mr-2" />
+                    View Assignments
+                    {filteredAssignments.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto">
+                        {filteredAssignments.length}
+                      </Badge>
+                    )}
                   </Button>
                 </CardContent>
               </Card>
