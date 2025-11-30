@@ -61,9 +61,13 @@ export function InstitutionBranding({ institution, onUpdate }: InstitutionBrandi
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) {
-        // If bucket doesn't exist, try to create it or use a different approach
-        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('bucket')) {
-          throw new Error('Storage bucket not configured. Please contact support or run the migration to create the bucket.');
+        // If bucket doesn't exist, provide helpful error message
+        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('bucket') || uploadError.message?.includes('does not exist')) {
+          throw new Error(
+            'Storage bucket "institution_logos" not found. ' +
+            'Please run the migration file: supabase/migrations/20251201000003_ensure_institution_logos_bucket.sql ' +
+            'in your Supabase SQL editor, or create the bucket manually in Supabase Dashboard > Storage.'
+          );
         }
         throw uploadError;
       }

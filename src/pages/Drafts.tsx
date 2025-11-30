@@ -18,9 +18,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { FileText, Trash2, Cloud, Lock, RefreshCw, ArrowLeft } from 'lucide-react';
+import { FileText, Trash2, Cloud, Lock, RefreshCw, ArrowLeft, Eye } from 'lucide-react';
 import { LocalEssay } from '@/types/essay';
 import { format } from 'date-fns';
+import { EssayViewer } from '@/components/essay/EssayViewer';
 
 export default function Drafts() {
   const navigate = useNavigate();
@@ -30,6 +31,7 @@ export default function Drafts() {
   const { syncing, syncEssays, deleteCloudEssay, lastSyncTime, fetchCloudEssays } = useCloudSync();
   const [sortedEssays, setSortedEssays] = useState<LocalEssay[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewingEssay, setViewingEssay] = useState<LocalEssay | null>(null);
 
   // Fetch and sync essays on page load
   useEffect(() => {
@@ -226,6 +228,14 @@ export default function Drafts() {
                     <div className="flex gap-2">
                       <Button 
                         size="sm" 
+                        variant="outline"
+                        onClick={() => setViewingEssay(essay)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View
+                      </Button>
+                      <Button 
+                        size="sm" 
                         onClick={() => handleContinue(essay)}
                       >
                         Continue
@@ -263,6 +273,13 @@ export default function Drafts() {
           Synced locally & in cloud — Built by Mithil & Hasti
         </footer>
       </div>
+
+      {/* Essay Viewer Dialog */}
+      <EssayViewer 
+        essay={viewingEssay}
+        open={!!viewingEssay}
+        onOpenChange={(open) => !open && setViewingEssay(null)}
+      />
     </PageLayout>
   );
 }
