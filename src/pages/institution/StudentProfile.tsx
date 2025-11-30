@@ -133,14 +133,17 @@ export default function StudentProfile() {
 
       if (profileError) throw profileError;
 
-      // Fetch email from auth.users (if accessible)
+      // Fetch email using the get_user_emails function
       let email: string | null = null;
       try {
-        const { data: authData } = await supabase.auth.admin.getUserById(memberData.user_id);
-        email = authData?.user?.email || null;
+        const { data: emailData, error: emailError } = await supabase
+          .rpc('get_user_emails', { user_ids: [memberData.user_id] });
+        
+        if (!emailError && emailData && emailData.length > 0) {
+          email = emailData[0].email || null;
+        }
       } catch (e) {
-        // If admin access not available, try to get from profiles or skip
-        console.log('Could not fetch email from auth');
+        console.log('Could not fetch email:', e);
       }
 
       setStudentProfile({
