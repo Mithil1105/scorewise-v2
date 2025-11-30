@@ -163,22 +163,28 @@ export function useCloudSync() {
         }
       }
 
-      // Add cloud-only essays to local
+      // Add cloud-only essays to local (essays that exist in cloud but not in local)
       for (const cloud of cloudEssays) {
-        if (!processedCloudIds.has(cloud.id) && cloud.local_id && !localEssays.find(l => l.localId === cloud.local_id)) {
-          mergedEssays.push({
-            localId: cloud.local_id || crypto.randomUUID(),
-            examType: cloud.exam_type as LocalEssay['examType'],
-            topic: cloud.topic || '',
-            essayText: cloud.essay_text || '',
-            createdAt: cloud.created_at,
-            updatedAt: cloud.updated_at,
-            wordCount: cloud.word_count || 0,
-            aiScore: cloud.ai_score || undefined,
-            aiFeedback: cloud.ai_feedback || undefined,
-            cloudId: cloud.id,
-            syncedAt: new Date().toISOString()
-          });
+        if (!processedCloudIds.has(cloud.id)) {
+          // Check if this cloud essay is already in local by cloudId
+          const alreadyInLocal = localEssays.find(l => l.cloudId === cloud.id);
+          if (!alreadyInLocal) {
+            // Generate a local_id if it doesn't exist
+            const localId = cloud.local_id || crypto.randomUUID();
+            mergedEssays.push({
+              localId,
+              examType: cloud.exam_type as LocalEssay['examType'],
+              topic: cloud.topic || '',
+              essayText: cloud.essay_text || '',
+              createdAt: cloud.created_at,
+              updatedAt: cloud.updated_at,
+              wordCount: cloud.word_count || 0,
+              aiScore: cloud.ai_score || undefined,
+              aiFeedback: cloud.ai_feedback || undefined,
+              cloudId: cloud.id,
+              syncedAt: new Date().toISOString()
+            });
+          }
         }
       }
 

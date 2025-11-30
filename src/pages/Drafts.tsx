@@ -27,21 +27,38 @@ export default function Drafts() {
   const { essays, saveEssays, deleteEssay } = useLocalEssays();
   const { deleteImagesForEssay } = useLocalImages();
   const { user, isOnline } = useAuth();
-  const { syncing, syncEssays, deleteCloudEssay, lastSyncTime } = useCloudSync();
+  const { syncing, syncEssays, deleteCloudEssay, lastSyncTime, fetchCloudEssays } = useCloudSync();
   const [sortedEssays, setSortedEssays] = useState<LocalEssay[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // Fetch and sync essays on page load
+  useEffect(() => {
+    const loadEssays = async () => {
+      if (user && isOnline) {
+        setLoading(true);
+        // Fetch from cloud and sync with local
+        // This will merge cloud essays with local essays and save them
+        const syncedEssays = await syncEssays(essays, saveEssays);
+        // The saveEssays callback in syncEssays will update the essays state
+        setLoading(false);
+      } else {
+        // Not logged in or offline - just show local essays
+        setLoading(false);
+      }
+    };
+
+    // Load essays when component mounts or when user/auth state changes
+    loadEssays();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isOnline]); // Only depend on user.id and isOnline to avoid infinite loops
+
+  // Update sorted essays whenever essays change
   useEffect(() => {
     const sorted = [...essays].sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
     setSortedEssays(sorted);
   }, [essays]);
-
-  useEffect(() => {
-    if (user && isOnline) {
-      syncEssays(essays, saveEssays);
-    }
-  }, [user, isOnline]);
 
   const handleSync = async () => {
     if (user && isOnline) {
@@ -147,7 +164,16 @@ export default function Drafts() {
           </p>
         )}
 
-        {sortedEssays.length === 0 ? (
+        {loading ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <div className="flex items-center justify-center gap-2">
+                <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                <span className="text-muted-foreground">Loading your essays...</span>
+              </div>
+            </CardContent>
+          </Card>
+        ) : sortedEssays.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
               <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
