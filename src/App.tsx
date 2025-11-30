@@ -33,8 +33,16 @@ import InstitutionAdmin from "./pages/institution/InstitutionAdmin";
 import StudentDashboard from "./pages/institution/StudentDashboard";
 import TeacherDashboard from "./pages/institution/TeacherDashboard";
 import ReviewAssignmentEssay from "./pages/institution/ReviewAssignmentEssay";
+import ViewReviewedEssay from "./pages/institution/ViewReviewedEssay";
+import GradingPage from "./pages/institution/GradingPage";
 import CombinedAssignment from "./pages/institution/CombinedAssignment";
 import NotFound from "./pages/NotFound";
+import Contact from "./pages/legal/contact";
+import Privacy from "./pages/legal/privacy";
+import Terms from "./pages/legal/terms";
+import Cookies from "./pages/legal/cookies";
+import Disclaimer from "./pages/legal/disclaimer";
+import { CookieConsentBanner } from "./components/CookieConsentBanner";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +54,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
+            <CookieConsentBanner />
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/essay" element={<Essay />} />
@@ -59,6 +68,13 @@ const App = () => (
               <Route path="/profile" element={<Profile />} />
               <Route path="/access-denied" element={<AccessDenied />} />
               <Route path="/review/:token" element={<ReviewEssay />} />
+              
+              {/* Legal Pages */}
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/cookies" element={<Cookies />} />
+              <Route path="/disclaimer" element={<Disclaimer />} />
               
               {/* Dashboard Redirect - automatically routes users to their appropriate dashboard */}
               <Route path="/dashboard" element={
@@ -86,6 +102,16 @@ const App = () => (
               <Route path="/institution/review-essay/:essayId" element={
                 <ProtectedRoute>
                   <ReviewAssignmentEssay />
+                </ProtectedRoute>
+              } />
+              <Route path="/institution/view-reviewed-essay/:essayId" element={
+                <ProtectedRoute>
+                  <ViewReviewedEssay />
+                </ProtectedRoute>
+              } />
+              <Route path="/institution/grading" element={
+                <ProtectedRoute>
+                  <GradingPage />
                 </ProtectedRoute>
               } />
               <Route path="/institution/assignments/group/:groupId" element={

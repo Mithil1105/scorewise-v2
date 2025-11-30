@@ -80,26 +80,58 @@ export function StudentAssignments() {
       const studentAssignmentIds = new Set(studentAssignments?.map(sa => sa.assignment_id) || []);
 
       // Check which assignments have specific students assigned
-      const { data: allStudentAssignments } = await supabase
-        .from('assignment_students')
-        .select('assignment_id');
+      const assignmentIds = (allAssignments || []).map(a => a.id);
+      let allStudentAssignments = null;
+      if (assignmentIds.length > 0) {
+        const { data } = await supabase
+          .from('assignment_students')
+          .select('assignment_id')
+          .in('assignment_id', assignmentIds);
+        allStudentAssignments = data;
+      }
 
       const assignmentsWithSpecificStudents = new Set(
         allStudentAssignments?.map(sa => sa.assignment_id) || []
       );
 
+      // Fetch batches this student belongs to
+      const { data: studentBatches } = await supabase
+        .from('batch_members')
+        .select('batch_id')
+        .eq('member_id', activeMembership.id);
+
+      const studentBatchIds = new Set(studentBatches?.map(sb => sb.batch_id) || []);
+
       // Filter assignments:
-      // 1. If assignment has specific students assigned, only show if this student is in the list
-      // 2. If assignment has no specific students, show to all (or filter by batch if needed)
+      // 1. If assignment has batch_id, only show if student is in that batch
+      // 2. If assignment has specific students assigned (via assignment_students table), only show if this student is in the list
+      // 3. If assignment has no batch_id AND no specific students, show to ALL students (assigned to everyone)
       const assignmentsData = (allAssignments || []).filter(assignment => {
-        // If this assignment has specific students assigned
+        // First check: If assignment has a batch_id, student must be in that batch
+        if (assignment.batch_id) {
+          const isInBatch = studentBatchIds.has(assignment.batch_id);
+          return isInBatch;
+        }
+        
+        // Second check: If assignment has specific students assigned (entries in assignment_students table)
         if (assignmentsWithSpecificStudents.has(assignment.id)) {
           // Only show if this student is specifically assigned
-          return studentAssignmentIds.has(assignment.id);
+          const isAssigned = studentAssignmentIds.has(assignment.id);
+          return isAssigned;
         }
-        // If assignment has no specific students, show to all students
-        // (batch filtering can be added later if needed)
+        
+        // Third case: Assignment has no batch_id AND no specific students
+        // This means it's assigned to "everyone" - show to all students
         return true;
+      });
+      
+      console.log('Assignment filtering debug:', {
+        totalAssignments: allAssignments?.length || 0,
+        assignmentsWithBatch: (allAssignments || []).filter(a => a.batch_id).length,
+        assignmentsWithSpecificStudents: assignmentsWithSpecificStudents.size,
+        studentBatchIds: Array.from(studentBatchIds),
+        studentAssignmentIds: Array.from(studentAssignmentIds),
+        filteredCount: assignmentsData.length
       });
 
       // Fetch submissions for this student
@@ -403,9 +435,20 @@ export function StudentAssignments() {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="text-sm text-muted-foreground mb-2">
                             {assignment.submission.teacher_feedback}
                           </p>
+                          {assignment.submission.status === 'reviewed' && assignment.submission.essay_id && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => navigate(`/institution/view-reviewed-essay/${assignment.submission.essay_id}`)}
+                              className="mt-2"
+                            >
+                              <FileText className="h-4 w-4 mr-1" />
+                              View Reviewed Essay
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>

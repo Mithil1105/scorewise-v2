@@ -14,7 +14,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { 
   BookOpen, Building2, Users, FileText, 
   ClipboardList, Loader2, GraduationCap, FolderOpen,
-  TrendingUp, CheckCircle2, Clock, AlertCircle, Sparkles, ArrowRight
+  TrendingUp, CheckCircle2, Clock, AlertCircle, Sparkles, ArrowRight,
+  Award
 } from 'lucide-react';
 import { AssignmentManager } from '@/components/institution/AssignmentManager';
 import { BatchManager } from '@/components/institution/BatchManager';
@@ -28,6 +29,7 @@ interface Student {
     display_name: string | null;
     avatar_url: string | null;
   };
+  email?: string | null;
   essayCount?: number;
   avgScore?: number;
 }
@@ -68,8 +70,19 @@ export default function TeacherDashboard() {
       return;
     }
 
-    // Only redirect to access denied if we've confirmed the user doesn't have access
+    // Give a small delay to allow institution context to restore from localStorage
     // This prevents race conditions where activeMembership might be null temporarily
+    if (!activeMembership) {
+      // Wait a bit longer - institution context might still be restoring
+      const timeout = setTimeout(() => {
+        if (!activeMembership) {
+          navigate('/access-denied');
+        }
+      }, 1000); // Give 1 second for context to restore
+      return () => clearTimeout(timeout);
+    }
+
+    // Only redirect to access denied if we've confirmed the user doesn't have access
     if (user && (!activeMembership || !['teacher', 'inst_admin'].includes(activeMembership.role) || activeMembership.status !== 'active')) {
       navigate('/access-denied');
       return;
@@ -102,6 +115,27 @@ export default function TeacherDashboard() {
         .from('profiles')
         .select('user_id, display_name, avatar_url')
         .in('user_id', userIds);
+
+      // Fetch user emails using database function
+      const emailMap = new Map<string, string>();
+      
+      if (userIds.length > 0) {
+        try {
+          // Use RPC function to get emails from auth.users
+          const { data: userEmails, error: emailError } = await supabase
+            .rpc('get_user_emails', { user_ids: userIds });
+          
+          if (!emailError && userEmails) {
+            userEmails.forEach((ue: { user_id: string; email: string }) => {
+              if (ue.email) {
+                emailMap.set(ue.user_id, ue.email);
+              }
+            });
+          }
+        } catch (err) {
+          console.log('Could not fetch emails:', err);
+        }
+      }
 
       // Fetch essays with scores
       const { data: essays } = await supabase
@@ -145,6 +179,7 @@ export default function TeacherDashboard() {
         return {
           ...m,
           profile: profileMap.get(m.user_id),
+          email: emailMap.get(m.user_id) || null,
           essayCount: countMap.get(m.user_id) || 0,
           avgScore: Math.round(avgScore * 10) / 10
         };
@@ -377,6 +412,18 @@ export default function TeacherDashboard() {
               <Button 
                 variant="outline" 
                 className="justify-start h-auto py-3"
+                onClick={() => navigate('/institution/grading')}
+              >
+                <Award className="h-4 w-4 mr-2" />
+                <div className="text-left">
+                  <div className="font-medium">Graded Assignments</div>
+                  <div className="text-xs text-muted-foreground">View all graded work</div>
+                </div>
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto py-3"
                 onClick={() => navigate('/institution/admin')}
                 disabled={activeMembership.role !== 'inst_admin'}
               >
@@ -452,6 +499,7 @@ export default function TeacherDashboard() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Student</TableHead>
+                        <TableHead>Email</TableHead>
                         <TableHead>Essays</TableHead>
                         <TableHead>Avg Score</TableHead>
                         <TableHead>Joined</TableHead>
@@ -473,6 +521,11 @@ export default function TeacherDashboard() {
                                 {student.profile?.display_name || 'Student'}
                               </span>
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground">
+                              {student.email || '—'}
+                            </span>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

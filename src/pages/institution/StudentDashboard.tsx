@@ -12,9 +12,10 @@ import { Loader2 } from 'lucide-react';
 import { 
   GraduationCap, Building2, FileText, TrendingUp, 
   MessageSquare, BookOpen, PenTool, CheckCircle2, Clock,
-  Award, Target, ArrowRight, Sparkles
+  Award, Target, ArrowRight, Sparkles, Star, Calendar
 } from 'lucide-react';
 import { StudentAssignments } from '@/components/institution/StudentAssignments';
+import { format } from 'date-fns';
 
 interface StudentStats {
   totalEssays: number;
@@ -22,6 +23,21 @@ interface StudentStats {
   pendingAssignments: number;
   completedAssignments: number;
   recentScore?: number;
+}
+
+interface ReviewedAssignment {
+  id: string;
+  assignment_id: string;
+  essay_id: string | null;
+  assignment: {
+    id: string;
+    title: string;
+    exam_type: string;
+  };
+  teacher_feedback: string | null;
+  teacher_score: number | null;
+  reviewed_at: string | null;
+  status: string;
 }
 
 export default function StudentDashboard() {
@@ -35,6 +51,8 @@ export default function StudentDashboard() {
     completedAssignments: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [reviewedAssignments, setReviewedAssignments] = useState<ReviewedAssignment[]>([]);
+  const [loadingFeedback, setLoadingFeedback] = useState(true);
 
   useEffect(() => {
     // Wait for both loading states to complete before checking access
@@ -48,64 +66,87 @@ export default function StudentDashboard() {
       return;
     }
 
-    // Only redirect if we've confirmed the user doesn't have an active membership
+    // Give a small delay to allow institution context to restore from localStorage
     // This prevents race conditions where activeMembership might be null temporarily
+    if (!activeMembership) {
+      // Wait a bit longer - institution context might still be restoring
+      const timeout = setTimeout(() => {
+        if (!activeMembership) {
+          navigate('/');
+        }
+      }, 1000); // Give 1 second for context to restore
+      return () => clearTimeout(timeout);
+    }
+
+    // Only redirect if we've confirmed the user doesn't have an active membership
     if (user && (!activeMembership || activeMembership.status !== 'active')) {
       navigate('/');
       return;
     }
 
-    // Fetch student stats
+    // Fetch student stats and feedback
     if (user && activeMembership && activeMembership.status === 'active' && activeInstitution) {
       fetchStudentStats();
+      fetchReviewedAssignments();
     }
   }, [user, activeMembership, activeInstitution, authLoading, institutionLoading, navigate]);
 
   const fetchStudentStats = async () => {
-    if (!activeInstitution || !user) return;
+    if (!activeInstitution || !user || !activeMembership) return;
     
     setLoading(true);
     try {
       // Fetch essays
       const { data: essays } = await supabase
         .from('essays')
-        .select('ai_score, created_at')
+        .select('ai_score, created_at, teacher_score')
         .eq('institution_id', activeInstitution.id)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      // Fetch assignments
+      // Fetch assignments for this institution
       const { data: assignments } = await supabase
         .from('assignments')
         .select('id, title, due_date')
-        .eq('institution_id', activeInstitution.id);
+        .eq('institution_id', activeInstitution.id)
+        .eq('is_active', true);
 
-      // Fetch submissions
+      // Fetch submissions for this student member
       const assignmentIds = assignments?.map(a => a.id) || [];
       const { data: submissions } = await supabase
         .from('assignment_submissions')
-        .select('assignment_id, status')
-        .in('assignment_id', assignmentIds)
-        .eq('user_id', user.id);
+        .select('assignment_id, status, teacher_score')
+        .in('assignment_id', assignmentIds.length > 0 ? assignmentIds : ['00000000-0000-0000-0000-000000000000'])
+        .eq('member_id', activeMembership.id);
 
-      const submissionMap = new Map(submissions?.map(s => [s.assignment_id, s.status]));
+      const submissionMap = new Map(submissions?.map(s => [s.assignment_id, { status: s.status, score: s.teacher_score }]));
       
+      // Count pending assignments (not started or in progress)
       const pendingAssignments = assignments?.filter(a => {
-        const status = submissionMap.get(a.id);
-        return !status || status === 'draft';
+        const sub = submissionMap.get(a.id);
+        return !sub || sub.status === 'draft' || sub.status === 'in_progress';
       }).length || 0;
 
+      // Count completed assignments (submitted or reviewed)
       const completedAssignments = assignments?.filter(a => {
-        const status = submissionMap.get(a.id);
-        return status === 'submitted' || status === 'graded';
+        const sub = submissionMap.get(a.id);
+        return sub && (sub.status === 'submitted' || sub.status === 'reviewed');
       }).length || 0;
 
-      const scoredEssays = essays?.filter(e => e.ai_score !== null) || [];
+      // Calculate average score from teacher scores (preferred) or AI scores
+      const scoredEssays = essays?.filter(e => e.teacher_score !== null || e.ai_score !== null) || [];
       const avgScore = scoredEssays.length > 0
-        ? scoredEssays.reduce((sum, e) => sum + (e.ai_score || 0), 0) / scoredEssays.length
+        ? scoredEssays.reduce((sum, e) => {
+            // Prefer teacher_score, fallback to ai_score
+            const score = e.teacher_score !== null ? e.teacher_score : (e.ai_score || 0);
+            return sum + score;
+          }, 0) / scoredEssays.length
         : 0;
 
-      const recentScore = essays?.[0]?.ai_score || undefined;
+      // Get most recent score (prefer teacher_score)
+      const recentScore = essays && essays.length > 0 && essays[0]?.teacher_score !== null 
+        ? essays[0].teacher_score 
+        : (essays && essays.length > 0 ? (essays[0]?.ai_score || undefined) : undefined);
 
       setStats({
         totalEssays: essays?.length || 0,
@@ -119,6 +160,63 @@ export default function StudentDashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchReviewedAssignments = async () => {
+    if (!activeInstitution || !activeMembership) return;
+    
+    setLoadingFeedback(true);
+    try {
+      // Fetch reviewed submissions with assignment details
+      // Show all reviewed assignments (with feedback or score)
+      const { data: submissions, error } = await supabase
+        .from('assignment_submissions')
+        .select(`
+          id,
+          assignment_id,
+          essay_id,
+          teacher_feedback,
+          teacher_score,
+          reviewed_at,
+          status,
+          assignment:assignments!inner(
+            id,
+            title,
+            exam_type
+          )
+        `)
+        .eq('member_id', activeMembership.id)
+        .eq('status', 'reviewed')
+        .or('teacher_feedback.not.is.null,teacher_score.not.is.null')
+        .order('reviewed_at', { ascending: false })
+        .limit(5);
+
+      if (error) throw error;
+
+      // Transform the data to match our interface
+      const reviewed = (submissions || []).map((sub: any) => ({
+        id: sub.id,
+        assignment_id: sub.assignment_id,
+        essay_id: sub.essay_id,
+        assignment: sub.assignment,
+        teacher_feedback: sub.teacher_feedback,
+        teacher_score: sub.teacher_score,
+        reviewed_at: sub.reviewed_at,
+        status: sub.status,
+      }));
+
+      setReviewedAssignments(reviewed);
+    } catch (err) {
+      console.error('Error fetching reviewed assignments:', err);
+    } finally {
+      setLoadingFeedback(false);
+    }
+  };
+
+  const getMaxScore = (examType: string): number => {
+    if (examType === 'GRE' || examType === 'IELTS-Task2' || examType === 'IELTS_T2') return 6;
+    if (examType === 'IELTS-Task1' || examType === 'IELTS_T1') return 3;
+    return 10;
   };
 
   // Show loading state while checking permissions
@@ -276,7 +374,19 @@ export default function StudentDashboard() {
                 <ArrowRight className="h-4 w-4 ml-auto" />
               </Button>
               <Button 
-                variant="outline" 
+                variant="outline"
+                className="justify-start h-auto py-3"
+                onClick={() => navigate('/institution/grading')}
+              >
+                <Award className="h-4 w-4 mr-2" />
+                <div className="text-left">
+                  <div className="font-medium">Graded Assignments</div>
+                  <div className="text-xs text-muted-foreground">View teacher feedback</div>
+                </div>
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+              <Button 
+                variant="outline"
                 className="justify-start h-auto py-3"
                 onClick={() => navigate('/drafts')}
               >
@@ -383,11 +493,90 @@ export default function StudentDashboard() {
               <CardDescription>Messages and feedback from your instructors</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                <p className="mb-2">No messages yet</p>
-                <p className="text-sm">Teacher feedback will appear here</p>
-              </div>
+              {loadingFeedback ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                </div>
+              ) : reviewedAssignments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p className="mb-2">No feedback yet</p>
+                  <p className="text-sm">Teacher feedback will appear here after your assignments are reviewed</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {reviewedAssignments.map((reviewed) => {
+                    const maxScore = getMaxScore(reviewed.assignment.exam_type);
+                    return (
+                      <div
+                        key={reviewed.id}
+                        className="p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                        onClick={() => {
+                          if (reviewed.essay_id) {
+                            navigate(`/institution/view-reviewed-essay/${reviewed.essay_id}`);
+                          }
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-sm mb-1">
+                              {reviewed.assignment.title}
+                            </h4>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Badge variant="outline" className="text-xs">
+                                {reviewed.assignment.exam_type}
+                              </Badge>
+                              {reviewed.reviewed_at && (
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  {format(new Date(reviewed.reviewed_at), 'MMM d, yyyy')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {reviewed.teacher_score !== null && (
+                            <div className="flex items-center gap-1">
+                              <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                              <span className="font-semibold text-sm">
+                                {reviewed.teacher_score} / {maxScore}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        {reviewed.teacher_feedback && (
+                          <p className="text-sm text-muted-foreground line-clamp-2 mt-2">
+                            {reviewed.teacher_feedback}
+                          </p>
+                        )}
+                        {reviewed.essay_id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 h-7 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/institution/view-reviewed-essay/${reviewed.essay_id}`);
+                            }}
+                          >
+                            View Full Feedback
+                            <ArrowRight className="h-3 w-3 ml-1" />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {reviewedAssignments.length >= 5 && (
+                    <Button
+                      variant="outline"
+                      className="w-full mt-2"
+                      onClick={() => navigate('/institution/grading')}
+                    >
+                      View All Graded Assignments
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

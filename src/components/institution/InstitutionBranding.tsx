@@ -60,11 +60,21 @@ export function InstitutionBranding({ institution, onUpdate }: InstitutionBrandi
         .from('institution_logos')
         .upload(filePath, file, { upsert: true });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        // If bucket doesn't exist, try to create it or use a different approach
+        if (uploadError.message?.includes('Bucket not found') || uploadError.message?.includes('bucket')) {
+          throw new Error('Storage bucket not configured. Please contact support or run the migration to create the bucket.');
+        }
+        throw uploadError;
+      }
 
       const { data: urlData } = supabase.storage
         .from('institution_logos')
         .getPublicUrl(filePath);
+      
+      if (!urlData?.publicUrl) {
+        throw new Error('Failed to get public URL for uploaded logo');
+      }
 
       setLogoUrl(urlData.publicUrl);
       toast({ title: 'Logo uploaded!' });

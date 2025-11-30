@@ -174,14 +174,6 @@ const Index = () => {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="px-4 py-8 border-t border-border">
-        <div className="max-w-4xl mx-auto text-center">
-          <p className="text-muted-foreground">
-            Synced locally & in cloud — Built by <span className="font-semibold text-foreground">Mithil & Hasti</span>
-          </p>
-        </div>
-      </footer>
     </PageLayout>
   );
 };

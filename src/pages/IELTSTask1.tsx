@@ -11,8 +11,8 @@ import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRandomTask1Question, IELTSTask1Question } from "@/data/ieltsTask1";
 import { exportIELTSTask1AsDocx } from "@/utils/exportIELTS";
-import { 
-  Play, Pause, RotateCcw, Shuffle, Download, Upload, 
+import {
+  Play, Pause, RotateCcw, Shuffle, Download, Upload,
   FileText, Zap, ImageIcon, X, CheckCircle2, AlertCircle, Loader2, Cloud, ClipboardList, ZoomIn, ZoomOut
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -58,7 +58,7 @@ const IELTSTask1 = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  
+
   const { essays, saveEssays, addEssay, updateEssay, getEssay } = useLocalEssays();
   const { images, addImage, getImagesForEssay } = useLocalImages();
   const { syncEssays, uploadEssay } = useCloudSync();
@@ -70,7 +70,7 @@ const IELTSTask1 = () => {
   const minWords = assignmentData?.assignmentMinWords || 150;
   const maxWords = assignmentData?.assignmentMaxWords;
   const targetReached = wordCount >= minWords;
-  
+
   const { saveStatus, forceSave } = useAutoSave(
     essay,
     currentLocalId,
@@ -170,7 +170,7 @@ const IELTSTask1 = () => {
 
       toast({
         title: 'Task 1 submitted!',
-        description: assignmentData.isClubbed 
+        description: assignmentData.isClubbed
           ? 'Task 1 submitted! Moving to Task 2...'
           : 'Your essay has been automatically submitted to your teacher.',
       });
@@ -232,14 +232,14 @@ const IELTSTask1 = () => {
         instructions: assignmentData.assignmentInstructions || "Complete the assignment as instructed."
       };
       setQuestion(assignmentQuestion);
-      
+
       // Load assignment image if provided
       if (assignmentData.assignmentImageUrl) {
         setCloudImageUrl(assignmentData.assignmentImageUrl);
         // For assignment images, we'll display the cloud URL directly
         setCustomImage(null); // Will use cloudImageUrl for display
       }
-      
+
       // Create new local essay entry for assignment
       const localId = crypto.randomUUID();
       const newEssay: LocalEssay = {
@@ -262,7 +262,7 @@ const IELTSTask1 = () => {
   // Load saved draft (only if not an assignment)
   useEffect(() => {
     if (assignmentData?.isAssignment) return; // Skip draft loading for assignments
-    
+
     const continueId = localStorage.getItem('scorewise_continue_essay');
     if (continueId) {
       localStorage.removeItem('scorewise_continue_essay');
@@ -297,7 +297,7 @@ const IELTSTask1 = () => {
       .from('ielts_t1')
       .select('*')
       .limit(100);
-    
+
     if (error || !data || data.length === 0) {
       // Fallback to local questions
       const newQuestion = getRandomTask1Question();
@@ -314,7 +314,7 @@ const IELTSTask1 = () => {
         description: randomItem.title,
         instructions: "Summarise the information by selecting and reporting the main features, and make comparisons where relevant."
       });
-      
+
       // If has image in database, use it
       if (randomItem.image_base64) {
         const imageDataUrl = `data:${randomItem.image_type || 'image/png'};base64,${randomItem.image_base64}`;
@@ -325,7 +325,7 @@ const IELTSTask1 = () => {
         setCloudImageUrl(null);
       }
     }
-    
+
     // Create new local essay entry
     const localId = crypto.randomUUID();
     const newEssay: LocalEssay = {
@@ -373,7 +373,7 @@ const IELTSTask1 = () => {
       const imageBase64 = event.target?.result as string;
       setCustomImage(imageBase64);
       setQuestion(null);
-      
+
       // Create new local essay entry
       const localId = crypto.randomUUID();
       const newEssay: LocalEssay = {
@@ -388,7 +388,7 @@ const IELTSTask1 = () => {
       addEssay(newEssay);
       setCurrentLocalId(localId);
       setEssay('');
-      
+
       // Save image to local storage as backup
       const newImage: LocalImage = {
         localId: crypto.randomUUID(),
@@ -404,7 +404,7 @@ const IELTSTask1 = () => {
         const result = await uploadImage(file, user.id, localId);
         if (result) {
           setCloudImageUrl(result.url);
-          
+
           // Update essay record with cloud image URL
           await supabase
             .from('essays')
@@ -414,7 +414,7 @@ const IELTSTask1 = () => {
       }
     };
     reader.readAsDataURL(file);
-    
+
     // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -487,7 +487,7 @@ const IELTSTask1 = () => {
     setIsRunning(false);
     setShowResults(true);
     forceSave();
-    
+
     if (user && isOnline) {
       await syncEssays(essays, saveEssays);
     }
@@ -508,7 +508,7 @@ const IELTSTask1 = () => {
   return (
     <PageLayout>
       <TopBar />
-      <div className="px-4 py-6 max-w-5xl mx-auto">
+      <div className="px-4 py-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6 flex items-start justify-between">
           <div>
@@ -520,7 +520,7 @@ const IELTSTask1 = () => {
               Writing Task 1
             </h1>
             <p className="text-muted-foreground">
-              {assignmentData?.isAssignment 
+              {assignmentData?.isAssignment
                 ? `Assignment: ${assignmentData.assignmentTitle || 'Complete the assignment'}`
                 : 'Summarize visual information in at least 150 words'}
             </p>
@@ -576,9 +576,9 @@ const IELTSTask1 = () => {
               <Shuffle className="h-4 w-4" />
               Random Question
             </Button>
-            <Button 
-              onClick={() => fileInputRef.current?.click()} 
-              variant="outline" 
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              variant="outline"
               className="gap-2"
               disabled={uploading}
             >
@@ -684,8 +684,8 @@ const IELTSTask1 = () => {
         {/* Full Screen Layout: Image Left, Editor Right */}
         {(question || customImage || cloudImageUrl) ? (
           <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-300px)] min-h-[600px]">
-            {/* Left Side: Image with Zoom */}
-            <div className="flex-shrink-0 lg:w-1/2 border rounded-lg bg-muted/30 overflow-hidden flex flex-col">
+            {/* Left Side: Image with Zoom - Expanded to take more space */}
+            <div className="flex-shrink-0 lg:w-[60%] xl:w-[65%] border rounded-lg bg-muted/30 overflow-hidden flex flex-col">
               <div className="p-3 border-b bg-card flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   {cloudImageUrl && (
@@ -740,22 +740,22 @@ const IELTSTask1 = () => {
                   )}
                 </div>
               </div>
-              <div 
+              <div
                 ref={imageContainerRef}
                 className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20"
               >
                 {cloudImageUrl ? (
-                  <img 
-                    src={cloudImageUrl} 
-                    alt="Assignment image" 
+                  <img
+                    src={cloudImageUrl}
+                    alt="Assignment image"
                     className="rounded-md object-contain transition-transform duration-200"
                     style={{ transform: `scale(${imageZoom / 100})`, maxWidth: '100%', maxHeight: '100%' }}
                     loading="lazy"
                   />
                 ) : customImage ? (
-                  <img 
-                    src={customImage} 
-                    alt="Uploaded question" 
+                  <img
+                    src={customImage}
+                    alt="Uploaded question"
                     className="rounded-md object-contain transition-transform duration-200"
                     style={{ transform: `scale(${imageZoom / 100})`, maxWidth: '100%', maxHeight: '100%' }}
                     loading="lazy"
@@ -770,8 +770,8 @@ const IELTSTask1 = () => {
               </div>
             </div>
 
-            {/* Right Side: Text Editor */}
-            <div className="flex-1 lg:w-1/2 flex flex-col border rounded-lg bg-card overflow-hidden">
+            {/* Right Side: Text Editor - Reduced width to give more space to image */}
+            <div className="flex-1 lg:w-[40%] xl:w-[35%] flex flex-col border rounded-lg bg-card overflow-hidden">
               <div className="p-3 border-b bg-muted/30">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-muted-foreground" />
@@ -863,7 +863,7 @@ const IELTSTask1 = () => {
                 <p className="text-sm text-muted-foreground">Avg WPM</p>
               </div>
             </div>
-            
+
             <div className="flex flex-col gap-2">
               <AIScorePanel
                 essay={essay}

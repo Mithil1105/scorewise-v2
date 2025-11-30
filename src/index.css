@@ -157,6 +157,28 @@
   .nav-tab:hover:not(.active) {
     @apply text-foreground;
   }
+
+  /* Essay corrections - yellow highlights */
+  .essay-correction {
+    background-color: #fef08a;
+    border-radius: 3px;
+    padding: 0 2px;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .essay-correction:hover {
+    background-color: #fde047;
+  }
+
+  .dark .essay-correction {
+    background-color: #854d0e;
+    color: #fef08a;
+  }
+
+  .dark .essay-correction:hover {
+    background-color: #a16207;
+  }
 }
 
 @layer utilities {
