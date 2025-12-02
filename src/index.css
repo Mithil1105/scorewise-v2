@@ -107,6 +107,103 @@
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
+  .vibrant {
+    /* Vibrant theme - HIGH VISIBILITY: Light background, strong colors, maximum clarity */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    /* Strong Indigo Primary - FILLED buttons */
+    --primary: 240 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Bright Cyan Secondary - FILLED buttons */
+    --secondary: 180 100% 40%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Light Gray Muted - subtle but clear */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+
+    /* Energetic Orange Accent - high visibility */
+    --accent: 25 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Module Colors - Vibrant and FILLED */
+    --essay: 240 100% 50%;
+    --essay-foreground: 0 0% 100%;
+    --typing: 180 100% 40%;
+    --typing-foreground: 0 0% 100%;
+    --vocab: 330 100% 50%;
+    --vocab-foreground: 0 0% 100%;
+
+    /* Strong Red for destructive - high contrast */
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Clear borders - visible but not overwhelming */
+    --border: 0 0% 85%;
+    --input: 0 0% 95%;
+    --ring: 240 100% 50%;
+
+    /* Strong shadows for depth */
+    --shadow-sm: 0 2px 4px 0 hsl(0 0% 0% / 0.1);
+    --shadow: 0 4px 8px -2px hsl(0 0% 0% / 0.15), 0 2px 4px -2px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0 10px 16px -4px hsl(0 0% 0% / 0.2), 0 4px 6px -4px hsl(0 0% 0% / 0.15);
+    --shadow-lg: 0 20px 24px -6px hsl(0 0% 0% / 0.25), 0 8px 10px -6px hsl(0 0% 0% / 0.2);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 0 0% 10%;
+    --sidebar-primary: 240 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 0 0% 85%;
+    --sidebar-ring: 240 100% 50%;
+  }
+
+  /* Vibrant mode specific overrides for high visibility */
+  .vibrant button[class*="bg-primary"],
+  .vibrant button[class*="bg-secondary"],
+  .vibrant button[class*="bg-destructive"] {
+    font-weight: 600 !important;
+    box-shadow: 0 2px 4px 0 hsl(0 0% 0% / 0.15) !important;
+  }
+
+  .vibrant button[class*="border-input"] {
+    background-color: hsl(var(--secondary)) !important;
+    color: hsl(var(--secondary-foreground)) !important;
+    border: none !important;
+    font-weight: 600 !important;
+  }
+
+  .vibrant [class*="badge"] {
+    font-weight: 700 !important;
+    border: none !important;
+    box-shadow: 0 1px 2px 0 hsl(0 0% 0% / 0.1) !important;
+  }
+
+  .vibrant [class*="card"] {
+    background-color: hsl(0 0% 100%) !important;
+    box-shadow: 0 4px 8px -2px hsl(0 0% 0% / 0.15) !important;
+  }
+
+  .vibrant [role="dialog"] {
+    background-color: hsl(0 0% 100%) !important;
+    box-shadow: 0 20px 24px -6px hsl(0 0% 0% / 0.25) !important;
+    border-width: 2px !important;
+  }
+
+  /* Smooth theme transitions */
+  * {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
 }
 
 @layer base {

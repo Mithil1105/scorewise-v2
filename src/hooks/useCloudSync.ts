@@ -59,12 +59,21 @@ export function useCloudSync() {
     }
   }, [user, isOnline]);
 
-  const uploadEssay = useCallback(async (essay: LocalEssay): Promise<string | null> => {
-    if (!user || !isOnline) return null;
+  const uploadEssay = useCallback(async (essay: LocalEssay, isFirstSubmit: boolean = false): Promise<string | null> => {
+    if (!user || !isOnline) {
+      console.error('Cannot upload essay: user or online status missing');
+      return null;
+    }
 
     // NEVER upload Task 1 images - only text content
     if (essay.examType === 'IELTS-Task1') {
       console.log('Skipping Task 1 image upload - only syncing text content');
+    }
+
+    // Validate essay text is not empty
+    if (!essay.essayText || !essay.essayText.trim()) {
+      console.error('Cannot upload empty essay');
+      return null;
     }
 
     // Calculate essay text size in bytes
@@ -77,7 +86,7 @@ export function useCloudSync() {
     if (newUsage > STORAGE_LIMIT_BYTES) {
       const usedMb = (currentUsage / (1024 * 1024)).toFixed(2);
       const limitMb = (STORAGE_LIMIT_BYTES / (1024 * 1024)).toFixed(0);
-      console.log('Storage limit reached:', usedMb, 'MB /', limitMb, 'MB');
+      console.error('Storage limit reached:', usedMb, 'MB /', limitMb, 'MB');
       
       toast({
         title: 'Storage limit reached',
@@ -96,26 +105,37 @@ export function useCloudSync() {
       essayTextLength: essay.essayText?.length || 0,
       wordCount: essay.wordCount,
       storageSizeKb,
+      isFirstSubmit,
     });
 
+    // Prepare insert data
+    const insertData: any = {
+      user_id: user.id,
+      exam_type: essay.examType,
+      topic: essay.topic,
+      essay_text: essay.essayText, // Always include essay_text
+      word_count: essay.wordCount,
+      ai_score: essay.aiScore,
+      ai_feedback: essay.aiFeedback,
+      local_id: essay.localId,
+      created_at: essay.createdAt,
+      updated_at: essay.updatedAt,
+      storage_size_kb: storageSizeKb, // Set storage size (trigger will also calculate)
+      institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
+      institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null,
+    };
+
+    // Only set original_essay_text on first submit (when it doesn't exist yet)
+    if (isFirstSubmit && essay.essayText) {
+      insertData.original_essay_text = essay.essayText;
+      console.log('Setting original_essay_text on first submit');
+    }
+
+    // Insert and return full row data
     const { data, error } = await supabase
       .from('essays')
-      .insert({
-        user_id: user.id,
-        exam_type: essay.examType,
-        topic: essay.topic,
-        essay_text: essay.essayText, // Always include essay_text
-        word_count: essay.wordCount,
-        ai_score: essay.aiScore,
-        ai_feedback: essay.aiFeedback,
-        local_id: essay.localId,
-        created_at: essay.createdAt,
-        updated_at: essay.updatedAt,
-        storage_size_kb: storageSizeKb, // Set storage size (trigger will also calculate)
-        institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
-        institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null,
-      })
-      .select('id')
+      .insert(insertData)
+      .select('id, essay_text, original_essay_text, word_count')
       .single();
 
     if (error) {
@@ -123,20 +143,34 @@ export function useCloudSync() {
       return null;
     }
 
-    console.log('Draft saved to cloud:', essay.essayText?.length || 0, 'characters');
+    console.log('Draft saved to cloud:', {
+      id: data.id,
+      essayTextLength: essay.essayText?.length || 0,
+      wordCount: data.word_count,
+      hasOriginalText: !!data.original_essay_text,
+    });
     return data?.id || null;
   }, [user, isOnline, activeMembership, activeInstitution, getUserStorageUsage, toast]);
 
   const updateCloudEssay = useCallback(async (cloudId: string, essay: LocalEssay): Promise<boolean> => {
-    if (!user || !isOnline) return false;
+    if (!user || !isOnline) {
+      console.error('Cannot update essay: user or online status missing');
+      return false;
+    }
+
+    // Validate essay text is not empty
+    if (!essay.essayText || !essay.essayText.trim()) {
+      console.error('Cannot update with empty essay');
+      return false;
+    }
 
     // Calculate new size
     const essayTextSize = new Blob([essay.essayText || '']).size;
     
-    // Get current essay to calculate size difference
+    // Get current essay to calculate size difference and check if original_essay_text exists
     const { data: currentEssay } = await supabase
       .from('essays')
-      .select('content_size')
+      .select('content_size, original_essay_text')
       .eq('id', cloudId)
       .single();
 
@@ -152,6 +186,7 @@ export function useCloudSync() {
         const usedMb = (currentUsage / (1024 * 1024)).toFixed(2);
         const limitMb = (STORAGE_LIMIT_BYTES / (1024 * 1024)).toFixed(0);
         
+        console.error('Storage limit reached on update');
         toast({
           title: 'Storage limit reached',
           description: `You've used ${usedMb} MB of ${limitMb} MB. Delete old drafts to continue.`,
@@ -165,19 +200,30 @@ export function useCloudSync() {
       examType: essay.examType,
       essayTextLength: essay.essayText?.length || 0,
       wordCount: essay.wordCount,
+      hasOriginalText: !!currentEssay?.original_essay_text,
     });
+
+    // Update data - never overwrite original_essay_text if it already exists
+    const updateData: any = {
+      topic: essay.topic,
+      essay_text: essay.essayText, // Always include essay_text
+      word_count: essay.wordCount,
+      ai_score: essay.aiScore,
+      ai_feedback: essay.aiFeedback,
+      updated_at: essay.updatedAt
+      // content_size will be auto-calculated by trigger
+      // original_essay_text is never updated - it's set once on first submit
+    };
+
+    // Only set original_essay_text if it doesn't exist yet (first update after creation)
+    if (!currentEssay?.original_essay_text && essay.essayText) {
+      updateData.original_essay_text = essay.essayText;
+      console.log('Setting original_essay_text on first update');
+    }
 
     const { error } = await supabase
       .from('essays')
-      .update({
-        topic: essay.topic,
-        essay_text: essay.essayText, // Always include essay_text
-        word_count: essay.wordCount,
-        ai_score: essay.aiScore,
-        ai_feedback: essay.aiFeedback,
-        updated_at: essay.updatedAt
-        // content_size will be auto-calculated by trigger
-      })
+      .update(updateData)
       .eq('id', cloudId)
       .eq('user_id', user.id);
 

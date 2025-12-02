@@ -85,7 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, name?: string) => {
-    const redirectUrl = `${window.location.origin}/`;
+    // Use production URL from env variable, fallback to current origin for local dev
+    const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
+    const redirectUrl = `${siteUrl}/`;
     
     const { error } = await supabase.auth.signUp({
       email,
@@ -112,10 +114,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
+    // Use production URL from env variable, fallback to current origin for local dev
+    const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
+    
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/`
+        redirectTo: `${siteUrl}/`
       }
     });
     

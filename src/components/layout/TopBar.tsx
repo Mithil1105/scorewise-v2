@@ -1,9 +1,10 @@
 import { useNavigate, Link } from 'react-router-dom';
 import { UserMenu } from './UserMenu';
 import { Button } from '@/components/ui/button';
-import { FileText, Mail } from 'lucide-react';
+import { FileText, Mail, Sun, Moon, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useInstitution } from '@/contexts/InstitutionContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Building2 } from 'lucide-react';
 
@@ -23,6 +24,7 @@ export function TopBar({
   const navigate = useNavigate();
   const { user } = useAuth();
   const { activeInstitution } = useInstitution();
+  const { theme, cycleTheme } = useTheme();
 
   // Use institution branding if available, otherwise use default
   const displayTitle = activeInstitution 
@@ -30,6 +32,18 @@ export function TopBar({
     : title;
   const logoUrl = activeInstitution?.logo_url;
   const themeColor = activeInstitution?.theme_color || undefined;
+
+  // Get theme icon
+  const getThemeIcon = () => {
+    switch (theme) {
+      case 'dark':
+        return <Moon className="h-4 w-4" />;
+      case 'vibrant':
+        return <Sparkles className="h-4 w-4" />;
+      default:
+        return <Sun className="h-4 w-4" />;
+    }
+  };
 
   return (
     <div className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
@@ -88,6 +102,17 @@ export function TopBar({
               <span className="hidden sm:inline">Drafts</span>
             </Button>
           )}
+          {/* Theme Toggle Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={cycleTheme}
+            className="gap-2"
+            title={`Current theme: ${theme}. Click to cycle themes.`}
+          >
+            {getThemeIcon()}
+            <span className="hidden sm:inline capitalize">{theme}</span>
+          </Button>
           <UserMenu />
         </div>
       </div>

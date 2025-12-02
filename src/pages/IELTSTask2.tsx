@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { TopBar } from "@/components/layout/TopBar";
 import { SaveStatus } from "@/components/essay/SaveStatus";
@@ -25,12 +25,12 @@ import { useInstitution } from "@/contexts/InstitutionContext";
 import { LocalEssay } from "@/types/essay";
 import { supabase } from "@/integrations/supabase/client";
 import { getRemainingStorage, calculateStorageSizeKb } from "@/utils/storageUsage";
-import { SubmitSuccessDialog } from "@/components/essay/SubmitSuccessDialog";
 
 const STORAGE_KEY = "scorewise_ielts_task2_draft";
 
 const IELTSTask2 = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const assignmentData = location.state as {
     isAssignment?: boolean;
     assignmentId?: string;
@@ -55,14 +55,16 @@ const IELTSTask2 = () => {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [wpm, setWpm] = useState(0);
   const [currentLocalId, setCurrentLocalId] = useState<string | null>(null);
-  const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
+  // Track cloud essay ID (null until first successful submit)
+  const [currentEssayId, setCurrentEssayId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
   
   const { essays, saveEssays, addEssay, updateEssay, getEssay } = useLocalEssays();
-  const { uploadEssay } = useCloudSync();
+  const { uploadEssay, updateCloudEssay } = useCloudSync();
   const { user, isOnline } = useAuth();
-  const { activeMembership } = useInstitution();
+  const { activeMembership, activeInstitution } = useInstitution();
 
   const wordCount = essay.trim() ? essay.trim().split(/\s+/).length : 0;
   const minWords = assignmentData?.assignmentMinWords || 250;
@@ -83,68 +85,308 @@ const IELTSTask2 = () => {
     }
   }, [essay, startTime, wordCount]);
 
+  /**
+   * UNIFIED SUBMIT FUNCTION FOR IELTS TASK 2
+   * Used by both manual submit and timer end
+   */
+  const submitEssayToCloud = useCallback(async (): Promise<{ success: boolean; essayId: string | null; error?: string }> => {
+    // Validation: Don't allow empty submissions
+    if (!essay.trim()) {
+      toast({
+        title: 'Cannot submit empty essay',
+        description: 'Please write some content before submitting.',
+        variant: 'destructive',
+      });
+      return { success: false, essayId: null, error: 'Empty essay' };
+    }
+
+    if (!user) {
+      toast({
+        title: 'Submission error',
+        description: 'Please log in to submit your essay.',
+        variant: 'destructive',
+      });
+      return { success: false, essayId: null, error: 'Not logged in' };
+    }
+
+    if (!isOnline) {
+      toast({
+        title: 'Offline',
+        description: 'Please connect to the internet to submit your essay.',
+        variant: 'destructive',
+      });
+      return { success: false, essayId: null, error: 'Offline' };
+    }
+
+    if (!topic) {
+      toast({
+        title: 'Submission error',
+        description: 'Please select a topic before submitting.',
+        variant: 'destructive',
+      });
+      return { success: false, essayId: null, error: 'No topic' };
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Read current editor text (single source of truth)
+      const currentText = essay.trim();
+      
+      // Calculate word count correctly
+      const calculatedWordCount = currentText
+        ? currentText.split(/\s+/).filter(word => word.length > 0).length
+        : 0;
+
+      // Check storage limit before upload
+      const storageSizeKb = calculateStorageSizeKb(currentText);
+      const { remaining } = await getRemainingStorage(supabase, user.id);
+      
+      if (remaining < storageSizeKb) {
+        toast({
+          title: "Storage limit exceeded",
+          description: "You've used 5MB of storage. Delete old drafts to continue.",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        return { success: false, essayId: null, error: 'Storage limit exceeded' };
+      }
+
+      // Determine if this is first submit
+      const isFirstSubmit = !currentEssayId;
+
+      // Build payload - ALWAYS include both topic AND essay_text
+      const payload: any = {
+        user_id: user.id,
+        exam_type: 'IELTS-Task2',
+        topic: topic.topic || '',
+        essay_text: currentText || '', // ALWAYS include essay_text, never null
+        word_count: calculatedWordCount || 0,
+        institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
+        institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null,
+      };
+      
+      // Set original_essay_text only on first submit
+      if (isFirstSubmit) {
+        payload.original_essay_text = currentText || '';
+      }
+      
+      // Remove any null/undefined values that might cause issues (but keep empty strings)
+      Object.keys(payload).forEach(key => {
+        if (payload[key] === null || payload[key] === undefined) {
+          delete payload[key];
+        }
+      });
+      
+      // Final validation - ensure essay_text is present
+      if (!payload.essay_text || payload.essay_text.length === 0) {
+        console.error('ERROR: essay_text is empty in payload!', payload);
+        toast({
+          title: 'Submission error',
+          description: 'Essay text is empty. Cannot submit.',
+          variant: 'destructive',
+        });
+        setIsSubmitting(false);
+        return { success: false, essayId: null, error: 'Empty essay text' };
+      }
+
+      console.log('Submitting IELTS Task 2 essay to cloud:', {
+        isFirstSubmit,
+        topic: topic.topic,
+        essayTextLength: currentText.length,
+        wordCount: calculatedWordCount,
+        currentEssayId,
+        payloadEssayText: payload.essay_text.substring(0, 100), // Preview first 100 chars
+      });
+
+      let resultEssayId: string | null = null;
+
+      if (isFirstSubmit) {
+        // INSERT new essay
+        console.log('INSERT payload:', JSON.stringify(payload, null, 2));
+        
+        const { data, error } = await supabase
+          .from('essays')
+          .insert(payload)
+          .select('id, essay_text, original_essay_text, word_count, topic')
+          .single();
+
+        if (error) {
+          console.error('Error inserting essay:', {
+            user_id: user.id,
+            exam_type: 'IELTS-Task2',
+            topic: topic.topic,
+            error: error.message,
+            errorDetails: error,
+            payload,
+          });
+          toast({
+            title: 'Submission error',
+            description: `Failed to save essay: ${error.message}`,
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return { success: false, essayId: null, error: error.message };
+        }
+
+        if (!data || !data.id) {
+          console.error('Insert succeeded but no ID returned');
+          toast({
+            title: 'Submission error',
+            description: 'Failed to save essay: No ID returned from server.',
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return { success: false, essayId: null, error: 'No ID returned' };
+        }
+
+        resultEssayId = data.id;
+        setCurrentEssayId(data.id);
+
+        // Update local essay with cloudId
+        if (currentLocalId) {
+          updateEssay(currentLocalId, { 
+            cloudId: data.id,
+            essayText: currentText,
+            wordCount: calculatedWordCount,
+          });
+        }
+
+        console.log('Essay inserted successfully:', {
+          id: data.id,
+          topic: data.topic,
+          essayTextLength: data.essay_text?.length || 0,
+          essayTextPreview: data.essay_text?.substring(0, 100) || 'EMPTY',
+          wordCount: data.word_count,
+          hasOriginalText: !!data.original_essay_text,
+        });
+        
+        // Verify the data was actually saved
+        if (!data.essay_text || data.essay_text.length === 0) {
+          console.error('WARNING: Essay text is empty after insert!', {
+            payloadEssayTextLength: currentText.length,
+            returnedEssayTextLength: data.essay_text?.length || 0,
+          });
+        }
+      } else {
+        // UPDATE existing essay (never overwrite original_essay_text)
+        const updatePayload = {
+          essay_text: currentText,
+          word_count: calculatedWordCount,
+          updated_at: new Date().toISOString(),
+          // Do NOT update original_essay_text - it's set once on first submit
+        };
+        
+        console.log('UPDATE payload:', JSON.stringify(updatePayload, null, 2));
+        
+        const { data, error } = await supabase
+          .from('essays')
+          .update(updatePayload)
+          .eq('id', currentEssayId)
+          .eq('user_id', user.id)
+          .select('id, essay_text, word_count, topic')
+          .single();
+
+        if (error) {
+          console.error('Error updating essay:', {
+            user_id: user.id,
+            essay_id: currentEssayId,
+            error: error.message,
+            errorDetails: error,
+          });
+          toast({
+            title: 'Submission error',
+            description: `Failed to update essay: ${error.message}`,
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return { success: false, essayId: null, error: error.message };
+        }
+
+        if (!data || !data.id) {
+          console.error('Update succeeded but no data returned');
+          toast({
+            title: 'Submission error',
+            description: 'Failed to update essay: No data returned from server.',
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return { success: false, essayId: null, error: 'No data returned' };
+        }
+
+        resultEssayId = data.id;
+
+        // Update local essay
+        if (currentLocalId) {
+          updateEssay(currentLocalId, { 
+            essayText: currentText,
+            wordCount: calculatedWordCount,
+          });
+        }
+
+        console.log('Essay updated successfully:', {
+          id: data.id,
+          topic: data.topic,
+          essayTextLength: data.essay_text?.length || 0,
+          essayTextPreview: data.essay_text?.substring(0, 100) || 'EMPTY',
+          wordCount: data.word_count,
+        });
+        
+        // Verify the data was actually saved
+        if (!data.essay_text || data.essay_text.length === 0) {
+          console.error('WARNING: Essay text is empty after update!', {
+            payloadEssayTextLength: currentText.length,
+            returnedEssayTextLength: data.essay_text?.length || 0,
+          });
+        }
+      }
+
+      // Clear localStorage draft after successful submit
+      localStorage.removeItem(STORAGE_KEY);
+
+      setIsSubmitting(false);
+      
+      toast({
+        title: 'Essay submitted successfully 🎉',
+        description: 'Your essay has been saved to the cloud.',
+      });
+
+      return { success: true, essayId: resultEssayId };
+    } catch (err: any) {
+      console.error('Error submitting essay:', {
+        user_id: user.id,
+        exam_type: 'IELTS-Task2',
+        topic: topic?.topic,
+        error: err.message,
+        errorStack: err.stack,
+      });
+      
+      toast({
+        title: 'Submission error',
+        description: err.message || 'Failed to submit essay. Your essay is still saved locally. Please try again.',
+        variant: 'destructive',
+      });
+      
+      setIsSubmitting(false);
+      return { success: false, essayId: null, error: err.message || 'Unknown error' };
+    }
+  }, [essay, user, isOnline, topic, currentEssayId, currentLocalId, activeMembership, activeInstitution, updateEssay, toast]);
+
   // Auto-submit assignment essay function
   const submitAssignmentEssay = useCallback(async () => {
-    if (!assignmentData?.isAssignment || !assignmentData.assignmentId || !activeMembership || !currentLocalId) {
+    if (!assignmentData?.isAssignment || !assignmentData.assignmentId || !activeMembership) {
+      return;
+    }
+
+    // First submit the essay to cloud using unified function
+    const result = await submitEssayToCloud();
+    
+    if (!result.success || !result.essayId) {
+      // Error already shown by submitEssayToCloud
       return;
     }
 
     try {
-      // Get the current essay and update with latest text
-      const currentEssayData = getEssay(currentLocalId);
-      if (!currentEssayData) {
-        return; // No essay found
-      }
-
-      // Update essay with current text before submitting
-      const updatedEssay = {
-        ...currentEssayData,
-        essayText: essay,
-        wordCount: essay.trim() ? essay.trim().split(/\s+/).length : 0,
-        updatedAt: new Date().toISOString()
-      };
-      updateEssay(currentLocalId, updatedEssay);
-
-      if (!updatedEssay.essayText.trim()) {
-        return; // No essay text to submit
-      }
-
-      // Check storage limit before upload
-      const storageSizeKb = calculateStorageSizeKb(essay);
-      if (user && isOnline) {
-        const { remaining } = await getRemainingStorage(supabase, user.id);
-        if (remaining < storageSizeKb) {
-          toast({
-            title: "Storage limit exceeded",
-            description: "You've used 5MB of storage. Delete old drafts to continue.",
-            variant: "destructive",
-          });
-          return;
-        }
-      }
-
-      // Ensure essay is saved to cloud first (only on submit, not auto-sync)
-      let essayId = updatedEssay.cloudId;
-      if (!essayId && user && isOnline) {
-        console.log("Cloud Upload Payload (Task 2 Assignment):", {
-          examType: updatedEssay.examType,
-          topic: updatedEssay.topic,
-          essayTextLength: updatedEssay.essayText.length,
-          wordCount: updatedEssay.wordCount,
-          storageSizeKb,
-        });
-        // Upload essay to cloud
-        essayId = await uploadEssay(updatedEssay);
-        if (essayId) {
-          updateEssay(currentLocalId, { cloudId: essayId });
-        }
-      }
-
-      if (!essayId) {
-        console.error('Could not save essay to cloud');
-        return;
-      }
-
       // Find or create assignment submission
       const { data: existingSubmission, error: findError } = await supabase
         .from('assignment_submissions')
@@ -160,7 +402,7 @@ const IELTSTask2 = () => {
         const { error: updateError } = await supabase
           .from('assignment_submissions')
           .update({
-            essay_id: essayId,
+            essay_id: result.essayId,
             status: 'submitted',
             submitted_at: new Date().toISOString()
           })
@@ -173,7 +415,7 @@ const IELTSTask2 = () => {
           .insert({
             assignment_id: assignmentData.assignmentId,
             member_id: activeMembership.id,
-            essay_id: essayId,
+            essay_id: result.essayId,
             status: 'submitted',
             submitted_at: new Date().toISOString()
           });
@@ -193,7 +435,7 @@ const IELTSTask2 = () => {
         variant: 'destructive',
       });
     }
-  }, [assignmentData, activeMembership, currentLocalId, essay, getEssay, user, isOnline, uploadEssay, updateEssay, toast]);
+  }, [assignmentData, activeMembership, submitEssayToCloud, toast]);
 
   // Timer effect
   useEffect(() => {
@@ -203,12 +445,17 @@ const IELTSTask2 = () => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           setIsRunning(false);
-          setShowResults(true);
-          // Auto-submit when time runs out
-          submitAssignmentEssay();
-          // Clear essay text for next draft
-          setEssay("");
-          setCurrentLocalId(null);
+          // DO NOT clear essay - keep it visible
+          // Call submit function which will handle everything
+          if (assignmentData?.isAssignment) {
+            submitAssignmentEssay();
+          } else {
+            submitEssayToCloud().then(result => {
+              if (result.success) {
+                setShowResults(true);
+              }
+            });
+          }
           return 0;
         }
         return prev - 1;
@@ -216,7 +463,7 @@ const IELTSTask2 = () => {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isRunning, submitAssignmentEssay]);
+  }, [isRunning, submitAssignmentEssay, submitEssayToCloud, assignmentData]);
 
   // Autosave
   useEffect(() => {
@@ -286,12 +533,13 @@ const IELTSTask2 = () => {
   }, [isRunning, handleStart]);
 
   const handleReset = useCallback(() => {
+    // Only reset timer, don't clear essay
     setIsRunning(false);
     setTimeLeft(40 * 60);
     setStartTime(null);
     setWpm(0);
-    setEssay("");
     setShowResults(false);
+    // DO NOT clear essay - keep it visible
   }, []);
 
   const handleExport = useCallback(async () => {
@@ -320,96 +568,75 @@ const IELTSTask2 = () => {
     setStartTime(null);
     setWpm(0);
     setShowResults(false);
+    setCurrentEssayId(null);
     localStorage.removeItem(STORAGE_KEY);
   }, []);
 
-  // Submit essay to cloud (only on final submit, not auto-sync)
+  // Manual submit handler
   const handleSubmitEssay = useCallback(async () => {
-    if (!essay.trim() || !currentLocalId || !user || !isOnline) {
-      return;
-    }
-
-    try {
-      const currentEssayData = getEssay(currentLocalId);
-      if (!currentEssayData) return;
-
-      const updatedEssay = {
-        ...currentEssayData,
-        essayText: essay,
-        wordCount: essay.trim() ? essay.trim().split(/\s+/).length : 0,
-        updatedAt: new Date().toISOString()
-      };
-      updateEssay(currentLocalId, updatedEssay);
-
-      // Check storage limit
-      const storageSizeKb = calculateStorageSizeKb(essay);
-      const { remaining } = await getRemainingStorage(supabase, user.id);
-      
-      if (remaining < storageSizeKb) {
-        toast({
-          title: "Storage limit exceeded",
-          description: "You've used 5MB of storage. Delete old drafts to continue.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      console.log("Cloud Upload Payload (Task 2):", {
-        examType: updatedEssay.examType,
-        topic: updatedEssay.topic,
-        essayTextLength: updatedEssay.essayText.length,
-        wordCount: updatedEssay.wordCount,
-        storageSizeKb,
-      });
-
-      const cloudId = await uploadEssay(updatedEssay);
-      if (cloudId) {
-        updateEssay(currentLocalId, { cloudId });
-        setShowSubmitSuccess(true);
-      }
-    } catch (err: any) {
-      console.error('Error submitting essay:', err);
-      toast({
-        title: 'Submission error',
-        description: err.message || 'Failed to submit essay. Please try again.',
-        variant: 'destructive',
-      });
-    }
-  }, [essay, currentLocalId, user, isOnline, getEssay, updateEssay, uploadEssay, toast]);
+    await submitEssayToCloud();
+  }, [submitEssayToCloud]);
 
   const handleTimeEnd = useCallback(async () => {
     setIsRunning(false);
-    setShowResults(true);
     forceSave();
 
-    // Auto-submit if this is an assignment (only uploads on submit, not auto-sync)
-    if (assignmentData?.isAssignment) {
-      await submitAssignmentEssay();
-    } else {
-      await handleSubmitEssay();
-    }
+    // Call unified submit function
+    const result = await submitEssayToCloud();
     
-    // Clear essay text for next draft
-    setEssay("");
-    setCurrentLocalId(null);
-  }, [forceSave, submitAssignmentEssay, handleSubmitEssay, assignmentData]);
+    if (!result.success) {
+      // Show error - don't open results dialog
+      // Essay text remains visible in editor
+      toast({
+        title: "Couldn't save essay",
+        description: "We couldn't save this to the cloud. Your text is still here; please retry submit.",
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Calculate final WPM
+    let finalWpm = 0;
+    if (startTime && wordCount > 0) {
+      const elapsedMinutes = (Date.now() - startTime) / 60000;
+      if (elapsedMinutes > 0) {
+        finalWpm = Math.round(wordCount / elapsedMinutes);
+      }
+    }
+
+    // Update WPM state
+    setWpm(finalWpm);
+    
+    // Open results dialog with actual data
+    // Essay text remains visible in editor - DO NOT clear it
+    setShowResults(true);
+  }, [forceSave, submitEssayToCloud, startTime, wordCount, toast]);
 
   const handleFinishEarly = useCallback(async () => {
     setIsRunning(false);
-    setShowResults(true);
     forceSave();
 
-    // For non-assignment essays, offer to submit to cloud (only on submit, not auto-sync)
-    if (!assignmentData?.isAssignment) {
-      await handleSubmitEssay();
-    } else {
-      await submitAssignmentEssay();
-    }
+    // Call unified submit function
+    const result = await submitEssayToCloud();
     
-    // Clear essay text for next draft
-    setEssay("");
-    setCurrentLocalId(null);
-  }, [forceSave, handleSubmitEssay, submitAssignmentEssay, assignmentData]);
+    if (!result.success) {
+      // Error already shown
+      return;
+    }
+
+    // Calculate final WPM
+    let finalWpm = 0;
+    if (startTime && wordCount > 0) {
+      const elapsedMinutes = (Date.now() - startTime) / 60000;
+      if (elapsedMinutes > 0) {
+        finalWpm = Math.round(wordCount / elapsedMinutes);
+      }
+    }
+
+    setWpm(finalWpm);
+    setShowResults(true);
+    // Essay text remains visible - DO NOT clear it
+  }, [forceSave, submitEssayToCloud, startTime, wordCount]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -631,9 +858,9 @@ const IELTSTask2 = () => {
             ref={textareaRef}
             value={essay}
             onChange={(e) => setEssay(e.target.value)}
-            placeholder={isRunning ? "Start writing your essay here..." : "Click 'Start' to begin writing..."}
+            placeholder={isRunning ? "Start writing your essay here..." : essay.trim() ? "Your essay is saved. You can continue editing..." : "Click 'Start' to begin writing..."}
             className="essay-editor min-h-[500px] text-base"
-            disabled={showResults || !isRunning}
+            disabled={showResults}
             spellCheck={false}
             autoComplete="off"
             autoCorrect="off"
@@ -696,23 +923,28 @@ const IELTSTask2 = () => {
               </div>
             </div>
             <div className="flex gap-3">
-              <Button onClick={handleExport} className="flex-1 gap-2">
+              <Button 
+                onClick={() => {
+                  if (currentEssayId) {
+                    // Navigate to review page if we have essay ID
+                    navigate(`/review/${currentEssayId}`);
+                  } else {
+                    setShowResults(false);
+                  }
+                }} 
+                className="flex-1 gap-2"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Review
+              </Button>
+              <Button onClick={handleExport} variant="secondary" className="flex-1 gap-2">
                 <Download className="h-4 w-4" />
                 Download
-              </Button>
-              <Button onClick={() => setShowResults(false)} variant="outline" className="flex-1">
-                Review
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Submit Success Dialog */}
-      <SubmitSuccessDialog 
-        open={showSubmitSuccess} 
-        onOpenChange={setShowSubmitSuccess} 
-      />
     </PageLayout>
   );
 };

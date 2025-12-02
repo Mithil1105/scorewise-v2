@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { InstitutionProvider } from "@/contexts/InstitutionContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import ProtectedRoute from "@/components/routing/ProtectedRoute";
 import DashboardRedirect from "@/components/routing/DashboardRedirect";
 import Index from "./pages/Index";
@@ -54,13 +55,14 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <InstitutionProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <CookieConsentBanner />
-            <Routes>
+      <ThemeProvider>
+        <InstitutionProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <CookieConsentBanner />
+              <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/essay" element={<Essay />} />
               <Route path="/typing" element={<Typing />} />
@@ -200,6 +202,7 @@ const App = () => (
           </BrowserRouter>
         </TooltipProvider>
       </InstitutionProvider>
+      </ThemeProvider>
     </AuthProvider>
   </QueryClientProvider>
 );
