@@ -71,7 +71,24 @@ export default function ReviewAssignmentEssay() {
     deleteCorrection,
   } = useEssayCorrections();
 
-  const [essay, setEssay] = useState<{ id: string; essay_text: string | null; exam_type: string; topic: string | null } | null>(null);
+  const [essay, setEssay] = useState<{ 
+    id: string; 
+    essay_text: string | null; 
+    exam_type: string; 
+    topic: string | null;
+    ai_score: number | null;
+    ai_feedback: string | null;
+  } | null>(null);
+  const [aiReview, setAiReview] = useState<{
+    task_response: number | null;
+    coherence_cohesion: number | null;
+    lexical_resource: number | null;
+    grammar_range_accuracy: number | null;
+    final_band: number | null;
+    overall_comment: string | null;
+    feedback: string[];
+    improvements: string[];
+  } | null>(null);
   const [submission, setSubmission] = useState<SubmissionData | null>(null);
   const [assignment, setAssignment] = useState<AssignmentData | null>(null);
   const [corrections, setCorrections] = useState<EssayCorrection[]>([]);
@@ -88,10 +105,10 @@ export default function ReviewAssignmentEssay() {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        // Fetch essay (only original text, no edited version)
+        // Fetch essay with AI review data
         const { data: essayData, error: essayError } = await supabase
           .from('essays')
-          .select('id, essay_text, exam_type, topic')
+          .select('id, essay_text, exam_type, topic, ai_score, ai_feedback')
           .eq('id', essayId)
           .maybeSingle();
 
@@ -108,6 +125,25 @@ export default function ReviewAssignmentEssay() {
         }
 
         setEssay(essayData);
+
+        // Parse AI review if available
+        if (essayData.ai_feedback) {
+          try {
+            const parsed = JSON.parse(essayData.ai_feedback);
+            setAiReview({
+              task_response: parsed.task_response ?? null,
+              coherence_cohesion: parsed.coherence_cohesion ?? null,
+              lexical_resource: parsed.lexical_resource ?? null,
+              grammar_range_accuracy: parsed.grammar_range_accuracy ?? null,
+              final_band: parsed.final_band ?? essayData.ai_score ?? null,
+              overall_comment: parsed.overall_comment || parsed.comment || null,
+              feedback: Array.isArray(parsed.feedback) ? parsed.feedback : [],
+              improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],
+            });
+          } catch (e) {
+            console.error('Failed to parse AI feedback:', e);
+          }
+        }
 
         // Fetch corrections
         const correctionsData = await fetchCorrections(essayId);
@@ -392,6 +428,95 @@ export default function ReviewAssignmentEssay() {
                 )}
               </CardContent>
             </Card>
+
+            {/* AI Review Section */}
+            {aiReview && (
+              <Card className="border-blue-200 dark:border-blue-800">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                    <Star className="h-5 w-5" />
+                    AI Review
+                  </CardTitle>
+                  <CardDescription>
+                    AI-powered evaluation to help guide your review
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {essay?.exam_type?.includes('IELTS') && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {aiReview.task_response !== null && (
+                        <div className="p-2 bg-blue-50 dark:bg-blue-950/20 rounded">
+                          <p className="text-xs text-muted-foreground">Task Response</p>
+                          <p className="font-semibold">{aiReview.task_response.toFixed(1)}</p>
+                        </div>
+                      )}
+                      {aiReview.coherence_cohesion !== null && (
+                        <div className="p-2 bg-blue-50 dark:bg-blue-950/20 rounded">
+                          <p className="text-xs text-muted-foreground">Coherence & Cohesion</p>
+                          <p className="font-semibold">{aiReview.coherence_cohesion.toFixed(1)}</p>
+                        </div>
+                      )}
+                      {aiReview.lexical_resource !== null && (
+                        <div className="p-2 bg-blue-50 dark:bg-blue-950/20 rounded">
+                          <p className="text-xs text-muted-foreground">Lexical Resource</p>
+                          <p className="font-semibold">{aiReview.lexical_resource.toFixed(1)}</p>
+                        </div>
+                      )}
+                      {aiReview.grammar_range_accuracy !== null && (
+                        <div className="p-2 bg-blue-50 dark:bg-blue-950/20 rounded">
+                          <p className="text-xs text-muted-foreground">Grammar & Accuracy</p>
+                          <p className="font-semibold">{aiReview.grammar_range_accuracy.toFixed(1)}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {aiReview.final_band !== null && (
+                    <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <p className="text-xs text-muted-foreground mb-1">Overall Band Score</p>
+                      <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                        {aiReview.final_band.toFixed(1)}
+                      </p>
+                    </div>
+                  )}
+
+                  {aiReview.overall_comment && (
+                    <div>
+                      <p className="text-xs font-medium mb-1">AI Summary</p>
+                      <p className="text-sm text-muted-foreground">{aiReview.overall_comment}</p>
+                    </div>
+                  )}
+
+                  {aiReview.feedback.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium mb-2">Strengths</p>
+                      <ul className="space-y-1">
+                        {aiReview.feedback.map((item, idx) => (
+                          <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
+                            <span className="text-green-600 dark:text-green-400 mt-1">✓</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {aiReview.improvements.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium mb-2">Areas to Improve</p>
+                      <ul className="space-y-1">
+                        {aiReview.improvements.map((item, idx) => (
+                          <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
+                            <span className="text-orange-600 dark:text-orange-400 mt-1">→</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Feedback Form */}
             <Card>

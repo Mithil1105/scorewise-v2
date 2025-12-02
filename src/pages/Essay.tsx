@@ -892,6 +892,7 @@ const Essay = () => {
             examType="GRE"
             topic={topic?.topic}
             disabled={isTimerRunning}
+            essayId={currentEssayId || undefined}
           />
           <Button onClick={handleExport} variant="secondary" className="gap-2" disabled={!essay.trim()}>
             <Download className="h-4 w-4" />

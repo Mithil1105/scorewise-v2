@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { getRandomTask2Topic, IELTSTask2Topic, task2TypeLabels } from "@/data/ieltsTask2";
+import { getRandomTask2Topic, getIELTSTask2Topics, IELTSTask2Topic, task2TypeLabels } from "@/data/ieltsTask2";
 import { exportIELTSTask2AsDocx } from "@/utils/exportIELTS";
 import { 
   Play, Pause, RotateCcw, Shuffle, Download, Edit3,
@@ -476,6 +476,13 @@ const IELTSTask2 = () => {
     }
   }, [essay, notes, topic]);
 
+  // Preload topics when component mounts
+  useEffect(() => {
+    getIELTSTask2Topics().catch(error => {
+      console.error('Failed to preload topics:', error);
+    });
+  }, []);
+
   // Load saved draft
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -490,12 +497,21 @@ const IELTSTask2 = () => {
     }
   }, []);
 
-  const handleGenerateTopic = useCallback(() => {
-    const type = topicType === 'all' ? undefined : topicType;
-    const newTopic = getRandomTask2Topic(type);
-    setTopic(newTopic);
-    setCustomTopic("");
-  }, [topicType]);
+  const handleGenerateTopic = useCallback(async () => {
+    try {
+      const type = topicType === 'all' ? undefined : topicType;
+      const newTopic = await getRandomTask2Topic(type);
+      setTopic(newTopic);
+      setCustomTopic("");
+    } catch (error) {
+      console.error('Error generating topic:', error);
+      toast({
+        title: "Error loading topic",
+        description: error instanceof Error ? error.message : "Failed to load a random topic. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [topicType, toast]);
 
   const handleUseCustomTopic = useCallback(() => {
     if (customTopic.trim()) {
@@ -713,23 +729,41 @@ const IELTSTask2 = () => {
         {!assignmentData?.isAssignment && (
           <div className="mb-6">
             {/* Topic Selection */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <Select value={topicType} onValueChange={(v) => setTopicType(v as typeof topicType)}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Question type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              {Object.entries(task2TypeLabels).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          <Button onClick={handleGenerateTopic} variant="outline" className="gap-2">
-            <Shuffle className="h-4 w-4" />
-            Random Topic
-          </Button>
+        <div className="space-y-3 mb-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-muted-foreground">Task:</label>
+              <Select value="task2" disabled>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Task Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="task1">Task 1</SelectItem>
+                  <SelectItem value="task2">Task 2</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-muted-foreground">Category:</label>
+              <Select value={topicType} onValueChange={(v) => setTopicType(v as typeof topicType)}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Question type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {Object.entries(task2TypeLabels).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <Button onClick={handleGenerateTopic} variant="outline" className="gap-2">
+              <Shuffle className="h-4 w-4" />
+              Random Topic
+            </Button>
+          </div>
         </div>
 
             {/* Custom Topic Input */}
@@ -885,6 +919,7 @@ const IELTSTask2 = () => {
             taskType="task2"
             topic={topic?.topic}
             disabled={isRunning}
+            essayId={currentEssayId || undefined}
           />
           <Button onClick={handleExport} variant="secondary" className="gap-2" disabled={!essay.trim()}>
             <Download className="h-4 w-4" />

@@ -10,17 +10,25 @@ import { useAdmin } from "@/hooks/useAdmin";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface ScoreResult {
-  score: number;
+  task_response: number | null;
+  coherence_cohesion: number | null;
+  lexical_resource: number | null;
+  grammar_range_accuracy: number | null;
+  final_band: number;
+  word_count: number;
+  overall_comment: string;
+  feedback: string[];
+  improvements: string[];
+  remaining?: number;
+  // Legacy fields for backward compatibility
+  score?: number;
+  areas_to_improve?: string[];
   categoryScores?: {
     TaskAchievement: number;
     CoherenceCohesion: number;
     LexicalResource: number;
     GrammarRangeAccuracy: number;
   };
-  feedback: string[];
-  areas_to_improve: string[];
-  word_count: number;
-  remaining?: number;
 }
 
 interface CategoryScores {
@@ -37,16 +45,19 @@ interface AIScorePanelProps {
   topic?: string;
   imageUrl?: string; // Cloud URL for Task 1 images
   disabled?: boolean;
+  essayId?: string; // Optional: essay ID to save AI review to
+  onScoreReceived?: (scoreData: ScoreResult) => void; // Callback when score is received
 }
 
 const DAILY_LIMIT = 3;
 
-const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: AIScorePanelProps) => {
+const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, essayId, onScoreReceived }: AIScorePanelProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [scoreResult, setScoreResult] = useState<ScoreResult | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [remainingEvaluations, setRemainingEvaluations] = useState<number | null>(null);
+  const [isLoadingSavedReview, setIsLoadingSavedReview] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const { isAdmin } = useAdmin();
@@ -81,6 +92,60 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: 
 
     fetchRemaining();
   }, [user, isAdmin]);
+
+  // Load saved AI review when essayId is provided
+  useEffect(() => {
+    const loadSavedReview = async () => {
+      if (!essayId || !user) return;
+
+      setIsLoadingSavedReview(true);
+      try {
+        const { data, error } = await supabase
+          .from('essays')
+          .select('ai_score, ai_feedback, word_count')
+          .eq('id', essayId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading saved AI review:', error);
+          setIsLoadingSavedReview(false);
+          return;
+        }
+
+        if (data && data.ai_score !== null && data.ai_feedback) {
+          try {
+            const parsedFeedback = typeof data.ai_feedback === 'string' 
+              ? JSON.parse(data.ai_feedback) 
+              : data.ai_feedback;
+
+            const savedReview: ScoreResult = {
+              task_response: parsedFeedback.task_response ?? null,
+              coherence_cohesion: parsedFeedback.coherence_cohesion ?? null,
+              lexical_resource: parsedFeedback.lexical_resource ?? null,
+              grammar_range_accuracy: parsedFeedback.grammar_range_accuracy ?? null,
+              final_band: parsedFeedback.final_band ?? data.ai_score ?? 0,
+              word_count: data.word_count ?? wordCount, // Use original word count from database, fallback to current
+              overall_comment: parsedFeedback.overall_comment || '',
+              feedback: parsedFeedback.feedback || [],
+              improvements: parsedFeedback.improvements || [],
+            };
+
+            setScoreResult(savedReview);
+            // Don't auto-show the dialog, let user click to view
+          } catch (parseError) {
+            console.error('Error parsing saved AI feedback:', parseError);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading saved review:', err);
+      } finally {
+        setIsLoadingSavedReview(false);
+      }
+    };
+
+    loadSavedReview();
+  }, [essayId, user]);
 
   const handleGetScore = async () => {
     if (!canScore) {
@@ -137,6 +202,41 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: 
 
       setScoreResult(data);
       setShowResults(true);
+      
+      // Save AI review to essay if essayId is provided
+      if (essayId && data) {
+        try {
+          const aiReviewJson = JSON.stringify({
+            task_response: data.task_response ?? null,
+            coherence_cohesion: data.coherence_cohesion ?? null,
+            lexical_resource: data.lexical_resource ?? null,
+            grammar_range_accuracy: data.grammar_range_accuracy ?? null,
+            final_band: data.final_band ?? data.score ?? null,
+            overall_comment: data.overall_comment || '',
+            feedback: data.feedback || [],
+            improvements: data.improvements || data.areas_to_improve || [],
+          });
+
+          const { error: updateError } = await supabase
+            .from('essays')
+            .update({
+              ai_score: data.final_band ?? data.score ?? null,
+              ai_feedback: aiReviewJson,
+            })
+            .eq('id', essayId);
+
+          if (updateError) {
+            console.error('Failed to save AI review:', updateError);
+          }
+        } catch (err) {
+          console.error('Error saving AI review:', err);
+        }
+      }
+
+      // Call callback if provided
+      if (onScoreReceived) {
+        onScoreReceived(data);
+      }
       
       // Update remaining evaluations from response
       if (data.remaining !== undefined) {
@@ -200,21 +300,54 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: 
 
   const maxScore = examType === "GRE" ? 6 : 9;
 
+  const handleViewReview = () => {
+    if (scoreResult) {
+      setShowResults(true);
+    }
+  };
+
+  const hasSavedReview = scoreResult !== null;
+
   return (
     <>
       <div className="flex flex-col gap-1">
-        <Button
-          onClick={handleGetScore}
-          disabled={!canScore || isLoading}
-          className="gap-2 bg-gradient-to-r from-primary to-essay hover:opacity-90"
-        >
-          {isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
-          {isLoading ? "Scoring..." : "Get AI Score"}
-        </Button>
+        {hasSavedReview ? (
+          <div className="flex flex-col gap-2">
+            <Button
+              onClick={handleViewReview}
+              className="gap-2 bg-gradient-to-r from-primary to-essay hover:opacity-90"
+            >
+              <Sparkles className="h-4 w-4" />
+              View AI Review
+            </Button>
+            <Button
+              onClick={handleGetScore}
+              disabled={!canScore || isLoading}
+              variant="outline"
+              className="gap-2"
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              {isLoading ? "Re-scoring..." : "Re-score Essay"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            onClick={handleGetScore}
+            disabled={!canScore || isLoading || isLoadingSavedReview}
+            className="gap-2 bg-gradient-to-r from-primary to-essay hover:opacity-90"
+          >
+            {isLoading || isLoadingSavedReview ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            {isLoading ? "Scoring..." : isLoadingSavedReview ? "Loading..." : "Get AI Score"}
+          </Button>
+        )}
         {user && !isAdmin && remainingEvaluations !== null && (
           <span className={`text-xs text-center ${remainingEvaluations === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
             {remainingEvaluations === 0 
@@ -244,14 +377,69 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: 
               {/* Score Display */}
               <div className="text-center p-6 bg-gradient-to-br from-muted to-muted/50 rounded-xl">
                 <p className="text-sm text-muted-foreground mb-2">Your Score</p>
-                <p className={`text-6xl font-bold ${getScoreColor(scoreResult.score)}`}>
-                  {scoreResult.score.toFixed(1)}
+                <p className={`text-6xl font-bold ${getScoreColor(scoreResult.final_band ?? scoreResult.score ?? 0)}`}>
+                  {(scoreResult.final_band ?? scoreResult.score ?? 0).toFixed(1)}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">out of {maxScore}.0</p>
                 <Badge className="mt-3" variant="secondary">
-                  {getScoreLabel(scoreResult.score)}
+                  {getScoreLabel(scoreResult.final_band ?? scoreResult.score ?? 0)}
                 </Badge>
               </div>
+
+              {/* IELTS Sub-Scores */}
+              {examType === "IELTS" && (
+                (scoreResult.task_response !== null || scoreResult.coherence_cohesion !== null || 
+                 scoreResult.lexical_resource !== null || scoreResult.grammar_range_accuracy !== null) && (
+                  <div className="space-y-3">
+                    <h4 className="font-semibold flex items-center gap-2 text-foreground">
+                      <TrendingUp className="h-4 w-4 text-primary" />
+                      Band Scores by Criterion
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {scoreResult.task_response !== null && (
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                          <span className="text-sm text-muted-foreground">Task Response</span>
+                          <Badge variant="outline" className={getScoreColor(scoreResult.task_response)}>
+                            {scoreResult.task_response.toFixed(1)}
+                          </Badge>
+                        </div>
+                      )}
+                      {scoreResult.coherence_cohesion !== null && (
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                          <span className="text-sm text-muted-foreground">Coherence & Cohesion</span>
+                          <Badge variant="outline" className={getScoreColor(scoreResult.coherence_cohesion)}>
+                            {scoreResult.coherence_cohesion.toFixed(1)}
+                          </Badge>
+                        </div>
+                      )}
+                      {scoreResult.lexical_resource !== null && (
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                          <span className="text-sm text-muted-foreground">Lexical Resource</span>
+                          <Badge variant="outline" className={getScoreColor(scoreResult.lexical_resource)}>
+                            {scoreResult.lexical_resource.toFixed(1)}
+                          </Badge>
+                        </div>
+                      )}
+                      {scoreResult.grammar_range_accuracy !== null && (
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                          <span className="text-sm text-muted-foreground">Grammar & Accuracy</span>
+                          <Badge variant="outline" className={getScoreColor(scoreResult.grammar_range_accuracy)}>
+                            {scoreResult.grammar_range_accuracy.toFixed(1)}
+                          </Badge>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Overall Comment */}
+              {scoreResult.overall_comment && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <p className="text-xs font-medium mb-1 text-blue-700 dark:text-blue-300">AI Summary</p>
+                  <p className="text-sm text-muted-foreground">{scoreResult.overall_comment}</p>
+                </div>
+              )}
 
               {/* Word Count */}
               <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -259,41 +447,16 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: 
                 <Badge variant="outline">{scoreResult.word_count}</Badge>
               </div>
 
-              {/* Category Scores for Task 1 */}
-              {scoreResult.categoryScores && (
-                <div className="space-y-3">
-                  <h4 className="font-semibold flex items-center gap-2 text-foreground">
-                    <TrendingUp className="h-4 w-4 text-primary" />
-                    Band Scores by Criterion
-                  </h4>
-                  <div className="grid gap-2">
-                    {Object.entries(scoreResult.categoryScores).map(([key, value]) => (
-                      <div key={key} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
-                        <span className="text-sm text-muted-foreground">
-                          {key === 'TaskAchievement' ? 'Task Achievement' :
-                           key === 'CoherenceCohesion' ? 'Coherence & Cohesion' :
-                           key === 'LexicalResource' ? 'Lexical Resource' :
-                           key === 'GrammarRangeAccuracy' ? 'Grammar Range & Accuracy' : key}
-                        </span>
-                        <Badge variant="outline" className={getScoreColor(value)}>
-                          {value.toFixed(1)}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Feedback */}
               <div className="space-y-3">
                 <h4 className="font-semibold flex items-center gap-2 text-foreground">
                   <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  Feedback
+                  Strengths
                 </h4>
                 <ul className="space-y-2">
-                  {scoreResult.feedback.map((point, i) => (
+                  {(scoreResult.feedback || []).map((point, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                      <span className="text-green-600 mt-1">•</span>
+                      <span className="text-green-600 mt-1">✓</span>
                       <span>{point}</span>
                     </li>
                   ))}
@@ -307,9 +470,9 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled }: 
                   Areas to Improve
                 </h4>
                 <ul className="space-y-2">
-                  {scoreResult.areas_to_improve.map((point, i) => (
+                  {(scoreResult.improvements || scoreResult.areas_to_improve || []).map((point, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                      <span className="text-amber-600 mt-1">•</span>
+                      <span className="text-amber-600 mt-1">→</span>
                       <span>{point}</span>
                     </li>
                   ))}

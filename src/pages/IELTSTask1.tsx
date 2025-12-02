@@ -910,6 +910,7 @@ const IELTSTask1 = () => {
             topic={question?.description || (customImage ? "Custom uploaded image" : undefined)}
             imageUrl={cloudImageUrl || undefined}
             disabled={isRunning}
+            essayId={currentEssay?.cloudId || undefined}
           />
           <Button onClick={handleExport} variant="secondary" className="gap-2" disabled={!essay.trim()}>
             <Download className="h-4 w-4" />
@@ -962,6 +963,7 @@ const IELTSTask1 = () => {
                 taskType="task1"
                 topic={question?.description || (customImage ? "Custom uploaded image" : undefined)}
                 imageUrl={cloudImageUrl || undefined}
+                essayId={currentEssay?.cloudId || undefined}
               />
               <Button onClick={handleExport} variant="secondary" className="w-full gap-2">
                 <Download className="h-4 w-4" />
