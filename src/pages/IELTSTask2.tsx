@@ -118,7 +118,15 @@ const IELTSTask2 = () => {
       return { success: false, essayId: null, error: 'Offline' };
     }
 
-    if (!topic) {
+    // Check if topic exists OR if in assignment mode with assignment topic
+    const currentTopic = topic || (assignmentData?.isAssignment && assignmentData.assignmentTopic ? {
+      id: "assignment",
+      type: "opinion" as const,
+      topic: assignmentData.assignmentTopic,
+      instructions: assignmentData.assignmentInstructions || "Give reasons for your answer and include any relevant examples from your own knowledge or experience. Write at least 250 words.",
+    } : null);
+
+    if (!currentTopic) {
       toast({
         title: 'Submission error',
         description: 'Please select a topic before submitting.',
@@ -159,7 +167,7 @@ const IELTSTask2 = () => {
       const payload: any = {
         user_id: user.id,
         exam_type: 'IELTS-Task2',
-        topic: topic.topic || '',
+        topic: currentTopic.topic || '',
         essay_text: currentText || '', // ALWAYS include essay_text, never null
         word_count: calculatedWordCount || 0,
         institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
@@ -192,7 +200,7 @@ const IELTSTask2 = () => {
 
       console.log('Submitting IELTS Task 2 essay to cloud:', {
         isFirstSubmit,
-        topic: topic.topic,
+        topic: currentTopic.topic,
         essayTextLength: currentText.length,
         wordCount: calculatedWordCount,
         currentEssayId,
@@ -497,6 +505,18 @@ const IELTSTask2 = () => {
     }
   }, []);
 
+  // Set topic from assignment data when in assignment mode
+  useEffect(() => {
+    if (assignmentData?.isAssignment && assignmentData.assignmentTopic && !topic) {
+      setTopic({
+        id: "assignment",
+        type: "opinion", // Default type for assignments
+        topic: assignmentData.assignmentTopic,
+        instructions: assignmentData.assignmentInstructions || "Give reasons for your answer and include any relevant examples from your own knowledge or experience. Write at least 250 words.",
+      });
+    }
+  }, [assignmentData, topic]);
+
   const handleGenerateTopic = useCallback(async () => {
     try {
       const type = topicType === 'all' ? undefined : topicType;
@@ -525,7 +545,10 @@ const IELTSTask2 = () => {
   }, [customTopic]);
 
   const handleStart = useCallback(() => {
-    if (!topic) {
+    // Check if topic exists OR if in assignment mode with assignment topic
+    const hasTopic = topic || (assignmentData?.isAssignment && assignmentData.assignmentTopic);
+    
+    if (!hasTopic) {
       toast({
         title: "Select a topic first",
         description: "Generate a random topic or enter a custom one before starting.",
@@ -538,7 +561,7 @@ const IELTSTask2 = () => {
       setStartTime(Date.now());
     }
     textareaRef.current?.focus();
-  }, [topic, startTime, toast]);
+  }, [topic, assignmentData, startTime, toast]);
 
   const handleToggle = useCallback(() => {
     if (isRunning) {
@@ -560,7 +583,23 @@ const IELTSTask2 = () => {
 
   const handleExport = useCallback(async () => {
     try {
-      await exportIELTSTask2AsDocx(essay, topic, wordCount);
+      const exportTopic = topic || (assignmentData?.isAssignment && assignmentData.assignmentTopic ? {
+        id: "assignment",
+        type: "opinion" as const,
+        topic: assignmentData.assignmentTopic,
+        instructions: assignmentData.assignmentInstructions || "Give reasons for your answer and include any relevant examples from your own knowledge or experience. Write at least 250 words.",
+      } : null);
+      
+      if (!exportTopic) {
+        toast({
+          title: "Export failed",
+          description: "No topic available to export.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      await exportIELTSTask2AsDocx(essay, exportTopic, wordCount);
       toast({
         title: "Essay exported!",
         description: "Your Task 2 essay has been downloaded.",
@@ -572,7 +611,7 @@ const IELTSTask2 = () => {
         variant: "destructive",
       });
     }
-  }, [essay, topic, wordCount, toast]);
+  }, [essay, topic, assignmentData, wordCount, toast]);
 
   const handleStartOver = useCallback(() => {
     setEssay("");
@@ -917,7 +956,7 @@ const IELTSTask2 = () => {
             essay={essay}
             examType="IELTS"
             taskType="task2"
-            topic={topic?.topic}
+            topic={topic?.topic || (assignmentData?.isAssignment ? assignmentData.assignmentTopic : undefined)}
             disabled={isRunning}
             essayId={currentEssayId || undefined}
           />
