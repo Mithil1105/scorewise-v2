@@ -13,7 +13,7 @@ import { getRandomTask1Question, IELTSTask1Question } from "@/data/ieltsTask1";
 import { exportIELTSTask1AsDocx } from "@/utils/exportIELTS";
 import {
   Play, Pause, RotateCcw, Shuffle, Download, Upload,
-  FileText, Zap, ImageIcon, X, CheckCircle2, AlertCircle, Loader2, Cloud, ClipboardList, ZoomIn, ZoomOut
+  FileText, Zap, ImageIcon, X, CheckCircle2, AlertCircle, Loader2, Cloud, ClipboardList, ZoomIn, ZoomOut, Edit3
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import AIScorePanel from "@/components/essay/AIScorePanel";
@@ -25,7 +25,6 @@ import { useImageUpload } from "@/hooks/useImageUpload";
 import { LocalEssay, LocalImage } from "@/types/essay";
 import { supabase } from "@/integrations/supabase/client";
 import { getRemainingStorage, calculateStorageSizeKb } from "@/utils/storageUsage";
-import { SubmitSuccessDialog } from "@/components/essay/SubmitSuccessDialog";
 
 const STORAGE_KEY = "scorewise_ielts_task1_draft";
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -43,11 +42,15 @@ const IELTSTask1 = () => {
     assignmentMinWords?: number;
     assignmentMaxWords?: number;
     assignmentDueDate?: string;
+    assignmentExamType?: string; // For detecting General vs Academic
   } | null;
 
+  const [mode, setMode] = useState<"academic" | "general">("academic");
   const [question, setQuestion] = useState<IELTSTask1Question | null>(null);
   const [customImage, setCustomImage] = useState<string | null>(null); // Local preview
   const [cloudImageUrl, setCloudImageUrl] = useState<string | null>(null); // Cloud URL for AI scoring
+  const [customTopic, setCustomTopic] = useState(""); // For General Task 1
+  const [generalTopic, setGeneralTopic] = useState<string | null>(null); // Selected General topic
   const [essay, setEssay] = useState("");
   const [timeLeft, setTimeLeft] = useState(20 * 60); // 20 minutes
   const [isRunning, setIsRunning] = useState(false);
@@ -56,7 +59,6 @@ const IELTSTask1 = () => {
   const [wpm, setWpm] = useState(0);
   const [currentLocalId, setCurrentLocalId] = useState<string | null>(null);
   const [imageZoom, setImageZoom] = useState(100);
-  const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
@@ -70,15 +72,16 @@ const IELTSTask1 = () => {
   const { uploadImage, uploading, progress: uploadProgress } = useImageUpload();
 
   const wordCount = essay.trim() ? essay.trim().split(/\s+/).length : 0;
-  const minWords = assignmentData?.assignmentMinWords || 150;
+  // For General mode, no minimum word count; for Academic, use 150 or assignment min
+  const minWords = mode === "general" ? 0 : (assignmentData?.assignmentMinWords || 150);
   const maxWords = assignmentData?.assignmentMaxWords;
-  const targetReached = wordCount >= minWords;
+  const targetReached = mode === "general" ? true : wordCount >= minWords; // Always show target reached for General
 
   const { saveStatus, forceSave } = useAutoSave(
     essay,
     currentLocalId,
     updateEssay,
-    !!(question || customImage) && essay.length > 0
+    (mode === "academic" && !!(question || customImage)) || (mode === "general" && !!generalTopic) ? essay.length > 0 : false
   );
 
   const currentEssay = currentLocalId ? getEssay(currentLocalId) : null;
@@ -248,7 +251,10 @@ const IELTSTask1 = () => {
       const cloudId = await uploadEssay(updatedEssay);
       if (cloudId) {
         updateEssay(currentLocalId, { cloudId });
-        setShowSubmitSuccess(true);
+        toast({
+          title: "Essay saved",
+          description: "Your essay has been saved to the cloud.",
+        });
       }
     } catch (err: any) {
       console.error('Error submitting essay:', err);
@@ -312,11 +318,29 @@ const IELTSTask1 = () => {
         setCustomImage(null); // Will use cloudImageUrl for display
       }
 
+      // Determine if assignment is General or Academic based on exam_type
+      // Check if assignmentData has exam_type in location state (passed from navigation)
+      const assignmentExamType = (location.state as any)?.assignmentExamType;
+      const isGeneralAssignment = assignmentExamType === 'IELTS_T1_General' || 
+        (assignmentData.assignmentTopic && 
+         !assignmentData.assignmentImageUrl && 
+         !assignmentData.assignmentInstructions?.toLowerCase().includes("visual") &&
+         !assignmentData.assignmentInstructions?.toLowerCase().includes("chart") &&
+         !assignmentData.assignmentInstructions?.toLowerCase().includes("graph"));
+
+      // Set mode based on assignment type
+      if (isGeneralAssignment) {
+        setMode("general");
+        setGeneralTopic(assignmentData.assignmentTopic);
+      } else {
+        setMode("academic");
+      }
+
       // Create new local essay entry for assignment
       const localId = crypto.randomUUID();
       const newEssay: LocalEssay = {
         localId,
-        examType: 'IELTS-Task1',
+        examType: isGeneralAssignment ? 'IELTS-Task1-General' : 'IELTS-Task1',
         topic: assignmentData.assignmentTopic,
         essayText: '',
         createdAt: new Date().toISOString(),
@@ -493,11 +517,18 @@ const IELTSTask1 = () => {
   }, [toast, addEssay, addImage, user, isOnline, uploadImage]);
 
   const handleStart = useCallback(() => {
+    // Check if we have a valid topic/question based on mode
+    const hasValidTopic = mode === "general" 
+      ? generalTopic !== null
+      : (question || customImage || cloudImageUrl);
+    
     // Allow starting if it's an assignment (even without question/customImage loaded yet)
-    if (!assignmentData?.isAssignment && !question && !customImage && !cloudImageUrl) {
+    if (!assignmentData?.isAssignment && !hasValidTopic) {
       toast({
-        title: "Select a question first",
-        description: "Generate a random question or upload an image before starting.",
+        title: mode === "general" ? "Enter a topic first" : "Select a question first",
+        description: mode === "general" 
+          ? "Enter a topic or prompt before starting."
+          : "Generate a random question or upload an image before starting.",
         variant: "destructive",
       });
       return;
@@ -507,7 +538,7 @@ const IELTSTask1 = () => {
       setStartTime(Date.now());
     }
     textareaRef.current?.focus();
-  }, [question, customImage, cloudImageUrl, assignmentData, startTime, toast]);
+  }, [mode, question, customImage, cloudImageUrl, generalTopic, assignmentData, startTime, toast]);
 
   const handleToggle = useCallback(() => {
     if (isRunning) {
@@ -542,11 +573,42 @@ const IELTSTask1 = () => {
     }
   }, [essay, question, wordCount, customImage, toast]);
 
+  const handleUseCustomTopic = useCallback(() => {
+    if (!customTopic.trim()) {
+      toast({
+        title: "Topic required",
+        description: "Please enter a topic before starting.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setGeneralTopic(customTopic.trim());
+    setCustomTopic("");
+
+    // Create new local essay entry
+    const localId = crypto.randomUUID();
+    const newEssay: LocalEssay = {
+      localId,
+      examType: 'IELTS-Task1-General',
+      topic: customTopic.trim(),
+      essayText: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      wordCount: 0
+    };
+    addEssay(newEssay);
+    setCurrentLocalId(localId);
+    setEssay('');
+  }, [customTopic, addEssay, toast]);
+
   const handleStartOver = useCallback(() => {
     setEssay("");
     setQuestion(null);
     setCustomImage(null);
     setCloudImageUrl(null);
+    setGeneralTopic(null);
+    setCustomTopic("");
     setIsRunning(false);
     setTimeLeft(20 * 60);
     setStartTime(null);
@@ -588,21 +650,62 @@ const IELTSTask1 = () => {
       <div className="px-4 py-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6 flex items-start justify-between">
-          <div>
+          <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
               <Badge variant="outline">IELTS</Badge>
               <Badge>Task 1</Badge>
+              {/* Mode Toggle */}
+              {!assignmentData?.isAssignment && (
+                <div className="flex items-center gap-2 ml-2">
+                  <Button
+                    variant={mode === "academic" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setMode("academic");
+                      setQuestion(null);
+                      setCustomImage(null);
+                      setCloudImageUrl(null);
+                      setGeneralTopic(null);
+                      setCustomTopic("");
+                      setEssay("");
+                      setCurrentLocalId(null);
+                    }}
+                    className="h-7"
+                  >
+                    Academic
+                  </Button>
+                  <Button
+                    variant={mode === "general" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setMode("general");
+                      setQuestion(null);
+                      setCustomImage(null);
+                      setCloudImageUrl(null);
+                      setGeneralTopic(null);
+                      setCustomTopic("");
+                      setEssay("");
+                      setCurrentLocalId(null);
+                    }}
+                    className="h-7"
+                  >
+                    General
+                  </Button>
+                </div>
+              )}
             </div>
             <h1 className="text-2xl md:text-3xl font-serif font-bold text-foreground mb-2">
-              Writing Task 1
+              Writing Task 1 {mode === "general" && "(General)"}
             </h1>
             <p className="text-muted-foreground">
               {assignmentData?.isAssignment
                 ? `Assignment: ${assignmentData.assignmentTitle || 'Complete the assignment'}`
+                : mode === "general"
+                ? "Write a letter, note, or other response"
                 : 'Summarize visual information in at least 150 words'}
             </p>
           </div>
-          {(question || customImage) && <SaveStatus status={saveStatus} isSynced={isSynced} />}
+          {((mode === "academic" && (question || customImage)) || (mode === "general" && generalTopic)) && <SaveStatus status={saveStatus} isSynced={isSynced} />}
         </div>
 
         {!isOnline && (
@@ -646,34 +749,80 @@ const IELTSTask1 = () => {
           </Card>
         )}
 
-        {/* Question Selection (disabled for assignments) */}
+        {/* Question/Topic Selection (disabled for assignments) */}
         {!assignmentData?.isAssignment && (
-          <div className="flex flex-wrap gap-3 mb-6">
-            <Button onClick={handleGenerateQuestion} variant="outline" className="gap-2">
-              <Shuffle className="h-4 w-4" />
-              Random Question
-            </Button>
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              variant="outline"
-              className="gap-2"
-              disabled={uploading}
-            >
-              {uploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              Upload Image
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/jpg"
-              onChange={handleImageUpload}
-              className="hidden"
-            />
-          </div>
+          <>
+            {mode === "academic" ? (
+              <div className="flex flex-wrap gap-3 mb-6">
+                <Button onClick={handleGenerateQuestion} variant="outline" className="gap-2">
+                  <Shuffle className="h-4 w-4" />
+                  Random Question
+                </Button>
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  variant="outline"
+                  className="gap-2"
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  Upload Image
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+            ) : (
+              /* General Mode: Custom Topic Input */
+              <div className="mb-6">
+                {!generalTopic ? (
+                  <div className="flex gap-2">
+                    <Textarea
+                      value={customTopic}
+                      onChange={(e) => setCustomTopic(e.target.value)}
+                      placeholder="Enter your letter topic, prompt, or instructions..."
+                      className="resize-none h-24"
+                      spellCheck={false}
+                      data-gramm="false"
+                      data-gramm_editor="false"
+                      data-enable-grammarly="false"
+                    />
+                    <Button 
+                      onClick={handleUseCustomTopic} 
+                      variant="secondary"
+                      disabled={!customTopic.trim()}
+                      className="shrink-0"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mb-6 bg-card border border-border rounded-lg p-5">
+                    <p className="text-foreground leading-relaxed font-serif">{generalTopic}</p>
+                    <Button
+                      onClick={() => {
+                        setGeneralTopic(null);
+                        setEssay("");
+                        setCurrentLocalId(null);
+                      }}
+                      variant="ghost"
+                      size="sm"
+                      className="mt-3"
+                    >
+                      Change Topic
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* Upload Progress */}
@@ -688,7 +837,7 @@ const IELTSTask1 = () => {
         )}
 
         {/* Instructions Bar */}
-        {(question || customImage || cloudImageUrl) && (
+        {mode === "academic" && (question || customImage || cloudImageUrl) && (
           <div className="mb-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
             <p className="text-sm text-foreground">
               <span className="font-medium">Instructions: </span>
@@ -748,8 +897,10 @@ const IELTSTask1 = () => {
           <div className="flex gap-4">
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium ${targetReached ? 'bg-typing/20 text-typing' : 'bg-muted text-muted-foreground'}`}>
               <FileText className="h-4 w-4" />
-              <span>{wordCount} / {minWords}{maxWords ? `-${maxWords}` : '+'} words</span>
-              {targetReached && <CheckCircle2 className="h-4 w-4" />}
+              <span>
+                {wordCount} {mode === "general" ? "words" : `/${minWords}${maxWords ? `-${maxWords}` : '+'} words`}
+              </span>
+              {targetReached && mode === "academic" && <CheckCircle2 className="h-4 w-4" />}
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-sm font-medium">
               <Zap className="h-4 w-4" />
@@ -758,8 +909,8 @@ const IELTSTask1 = () => {
           </div>
         </div>
 
-        {/* Full Screen Layout: Image Left, Editor Right */}
-        {(question || customImage || cloudImageUrl) ? (
+        {/* Full Screen Layout: Image Left, Editor Right (Academic) OR Topic + Editor (General) */}
+        {mode === "academic" && (question || customImage || cloudImageUrl) ? (
           <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-300px)] min-h-[600px]">
             {/* Left Side: Image with Zoom - Expanded to take more space */}
             <div className="flex-shrink-0 lg:w-[60%] xl:w-[65%] border rounded-lg bg-muted/30 overflow-hidden flex flex-col">
@@ -874,8 +1025,27 @@ const IELTSTask1 = () => {
               </div>
             </div>
           </div>
-        ) : (
-          /* Fallback: Regular Editor when no image/question */
+        ) : mode === "general" && generalTopic ? (
+          /* General Mode: Task 2-like Layout */
+          <div className="mb-8">
+            <Textarea
+              ref={textareaRef}
+              value={essay}
+              onChange={(e) => setEssay(e.target.value)}
+              placeholder={isRunning ? "Start writing your letter or response here..." : "Click 'Start' to begin writing..."}
+              className="min-h-[500px] md:min-h-[600px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
+              disabled={showResults || !isRunning}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-enable-grammarly="false"
+            />
+          </div>
+        ) : mode === "academic" ? (
+          /* Fallback: Regular Editor when no image/question (Academic) */
           <div className="mb-8">
             <Textarea
               ref={textareaRef}
@@ -893,7 +1063,7 @@ const IELTSTask1 = () => {
               data-enable-grammarly="false"
             />
           </div>
-        )}
+        ) : null}
 
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-3">
@@ -906,9 +1076,9 @@ const IELTSTask1 = () => {
           <AIScorePanel
             essay={essay}
             examType="IELTS"
-            taskType="task1"
-            topic={question?.description || (customImage ? "Custom uploaded image" : undefined)}
-            imageUrl={cloudImageUrl || undefined}
+            taskType={mode === "general" ? undefined : "task1"}
+            topic={mode === "general" ? generalTopic || undefined : (question?.description || (customImage ? "Custom uploaded image" : undefined))}
+            imageUrl={mode === "general" ? undefined : (cloudImageUrl || undefined)}
             disabled={isRunning}
             essayId={currentEssay?.cloudId || undefined}
           />
@@ -977,11 +1147,6 @@ const IELTSTask1 = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Submit Success Dialog */}
-      <SubmitSuccessDialog
-        open={showSubmitSuccess}
-        onOpenChange={setShowSubmitSuccess}
-      />
     </PageLayout>
   );
 };

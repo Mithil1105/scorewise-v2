@@ -25,11 +25,23 @@ interface ScoreResponse {
   improvements: string[];
 }
 
-const DAILY_LIMIT = 3;
+const DAILY_LIMIT = 2;
 
 // Round to nearest 0.5
 function roundToHalf(num: number): number {
   return Math.round(num * 2) / 2;
+}
+
+// Get start of today (midnight) in UTC
+function getTodayStartUTC(): Date {
+  const now = new Date();
+  const utcDate = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    0, 0, 0, 0
+  ));
+  return utcDate;
 }
 
 serve(async (req) => {
@@ -42,8 +54,21 @@ serve(async (req) => {
 
     console.log(`Scoring ${examType} essay, taskType: ${taskType}, word count: ${essay.trim().split(/\s+/).length}`);
 
-    // Get user from auth header
+    // Get user from auth header - authentication is required
     const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({
+          error: "Unauthorized",
+          message: "Authentication required. Please sign in to use AI scoring.",
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     let userId: string | null = null;
     let isAdmin = false;
 
@@ -51,50 +76,61 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
 
-      if (user && !userError) {
-        userId = user.id;
-
-        // Check if user is admin
-        const { data: roleData } = await supabase
-          .from("user_roles")
-          .select("role")
-          .eq("user_id", userId)
-          .eq("role", "admin")
-          .maybeSingle();
-
-        isAdmin = !!roleData;
-
-        // Check daily limit for non-admin users
-        if (!isAdmin) {
-          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-          const { count, error: countError } = await supabase
-            .from("ai_usage_logs")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", userId)
-            .eq("action", "ai_score")
-            .gte("created_at", twentyFourHoursAgo);
-
-          if (countError) {
-            console.error("Error checking usage:", countError);
-          } else if (count !== null && count >= DAILY_LIMIT) {
-            return new Response(
-              JSON.stringify({
-                error: "Daily limit reached",
-                message: "You have used all 3 daily AI evaluations. Try again tomorrow or become Pro!",
-                remaining: 0,
-              }),
-              {
-                status: 429,
-                headers: { ...corsHeaders, "Content-Type": "application/json" },
-              }
-            );
-          }
+    if (!user || userError) {
+      return new Response(
+        JSON.stringify({
+          error: "Unauthorized",
+          message: "Invalid authentication token. Please sign in to use AI scoring.",
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
+      );
+    }
+
+    userId = user.id;
+
+    // Check if user is admin
+    const { data: roleData } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .eq("role", "admin")
+      .maybeSingle();
+
+    isAdmin = !!roleData;
+
+    // Check daily limit for non-admin users (midnight reset)
+    if (!isAdmin) {
+      // Get start of today (midnight UTC) for daily reset
+      const todayStart = getTodayStartUTC();
+      const todayStartISO = todayStart.toISOString();
+
+      const { count, error: countError } = await supabase
+        .from("ai_usage_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("action", "ai_score")
+        .gte("created_at", todayStartISO);
+
+      if (countError) {
+        console.error("Error checking usage:", countError);
+      } else if (count !== null && count >= DAILY_LIMIT) {
+        return new Response(
+          JSON.stringify({
+            error: "Daily limit reached",
+            message: `You have used all ${DAILY_LIMIT} daily AI evaluations. Try again tomorrow at midnight!`,
+            remaining: 0,
+          }),
+          {
+            status: 429,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
     }
 
@@ -437,21 +473,22 @@ ${essay}`;
       }
     }
 
-    // Calculate remaining evaluations for non-admin users
+    // Calculate remaining evaluations for non-admin users (midnight reset)
     let remaining: number | undefined;
     if (userId && !isAdmin) {
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const todayStart = getTodayStartUTC();
+      const todayStartISO = todayStart.toISOString();
       const { count } = await supabase
         .from("ai_usage_logs")
         .select("*", { count: "exact", head: true })
         .eq("user_id", userId)
         .eq("action", "ai_score")
-        .gte("created_at", twentyFourHoursAgo);
+        .gte("created_at", todayStartISO);
 
       remaining = count !== null ? Math.max(0, DAILY_LIMIT - count) : undefined;
     }
 
-    console.log("Scoring complete:", scoreData.score);
+    console.log("Scoring complete:", scoreData.final_band);
 
     return new Response(JSON.stringify({ ...scoreData, remaining }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

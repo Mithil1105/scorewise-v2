@@ -255,7 +255,7 @@ export function StudentAssignments() {
     }
 
     // Navigate to essay page with full assignment context
-    const route = assignment.exam_type === 'IELTS_T1' 
+    const route = (assignment.exam_type === 'IELTS_T1' || assignment.exam_type === 'IELTS_T1_General')
       ? '/ielts/task1'
       : assignment.exam_type === 'IELTS_T2'
       ? '/ielts/task2'
@@ -271,7 +271,8 @@ export function StudentAssignments() {
         assignmentImageUrl: assignment.image_url,
         assignmentMinWords: assignment.min_word_count,
         assignmentMaxWords: assignment.max_word_count,
-        assignmentDueDate: assignment.due_date
+        assignmentDueDate: assignment.due_date,
+        assignmentExamType: assignment.exam_type // Pass exam_type to help detect General mode
       }
     });
   };

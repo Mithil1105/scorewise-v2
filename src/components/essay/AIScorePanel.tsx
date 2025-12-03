@@ -49,7 +49,7 @@ interface AIScorePanelProps {
   onScoreReceived?: (scoreData: ScoreResult) => void; // Callback when score is received
 }
 
-const DAILY_LIMIT = 3;
+const DAILY_LIMIT = 2;
 
 const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, essayId, onScoreReceived }: AIScorePanelProps) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -63,30 +63,65 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, es
   const { isAdmin } = useAdmin();
 
   const wordCount = essay.trim() ? essay.trim().split(/\s+/).length : 0;
-  const canScore = wordCount >= 20 && !disabled && (isAdmin || remainingEvaluations === null || remainingEvaluations > 0);
+  // Require user to be signed in to use AI scoring
+  // For non-admin users, wait until we know the remaining count (don't allow if null/unknown)
+  const canScore = !!user && wordCount >= 20 && !disabled && (isAdmin || (remainingEvaluations !== null && remainingEvaluations > 0));
 
   // Fetch remaining evaluations on mount and when user changes
   useEffect(() => {
     const fetchRemaining = async () => {
-      if (!user || isAdmin) {
+      // Require authentication
+      if (!user) {
+        setRemainingEvaluations(null);
+        return;
+      }
+
+      // Admins have unlimited access
+      if (isAdmin) {
         setRemainingEvaluations(null);
         return;
       }
 
       try {
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const { count, error } = await supabase
-          .from("ai_usage_logs")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("action", "ai_score")
-          .gte("created_at", twentyFourHoursAgo);
+        // Call backend API to check daily limit with midnight reset
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          setRemainingEvaluations(null);
+          return;
+        }
 
-        if (!error && count !== null) {
-          setRemainingEvaluations(Math.max(0, DAILY_LIMIT - count));
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-daily-limit`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          setRemainingEvaluations(data.remaining);
+        } else {
+          // Handle 429 (rate limit) gracefully - don't log as error
+          if (response.status === 429) {
+            setRemainingEvaluations(0);
+          } else {
+            // Only log non-429 errors
+            try {
+              const data = await response.json();
+              console.error("Failed to fetch remaining evaluations:", data);
+            } catch {
+              // Ignore JSON parse errors
+            }
+            setRemainingEvaluations(null);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch remaining evaluations:", err);
+        setRemainingEvaluations(null);
       }
     };
 
@@ -148,11 +183,21 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, es
   }, [essayId, user]);
 
   const handleGetScore = async () => {
+    // Require authentication
+    if (!user) {
+      toast({
+        title: "Sign in required",
+        description: "Please sign in to use AI scoring.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!canScore) {
       if (remainingEvaluations === 0) {
         toast({
           title: "Daily limit reached",
-          description: "You have used all 3 daily AI evaluations. Try again tomorrow!",
+          description: "You have used all 2 daily AI evaluations. Try again tomorrow at midnight!",
           variant: "destructive",
         });
       } else {
@@ -169,13 +214,19 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, es
     setError(null);
 
     try {
+      // Get user session token for authentication
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("Authentication required");
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-score`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             essay,
@@ -241,6 +292,33 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, es
       // Update remaining evaluations from response
       if (data.remaining !== undefined) {
         setRemainingEvaluations(data.remaining);
+      } else {
+        // Refresh remaining count from backend (with error handling)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          try {
+            const limitResponse = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-daily-limit`,
+              {
+                method: "GET",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+              }
+            );
+            if (limitResponse.ok) {
+              const limitData = await limitResponse.json();
+              setRemainingEvaluations(limitData.remaining);
+            } else if (limitResponse.status === 429) {
+              // Rate limited - set to 0 silently
+              setRemainingEvaluations(0);
+            }
+            // Ignore other errors silently
+          } catch (err) {
+            // Silently ignore fetch errors (network issues, etc.)
+          }
+        }
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : "Failed to get score";
@@ -348,10 +426,15 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, es
             {isLoading ? "Scoring..." : isLoadingSavedReview ? "Loading..." : "Get AI Score"}
           </Button>
         )}
+        {!user && (
+          <span className="text-xs text-center text-muted-foreground">
+            Sign in to use AI scoring
+          </span>
+        )}
         {user && !isAdmin && remainingEvaluations !== null && (
           <span className={`text-xs text-center ${remainingEvaluations === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
             {remainingEvaluations === 0 
-              ? "Daily limit reached" 
+              ? "Daily limit reached (resets at midnight)" 
               : `${remainingEvaluations}/${DAILY_LIMIT} evaluations left today`}
           </span>
         )}

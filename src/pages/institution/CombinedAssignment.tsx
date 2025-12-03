@@ -429,7 +429,7 @@ const CombinedAssignment = () => {
                       )}
                       <Button
                         onClick={() => {
-                          const route = assignment.exam_type === 'IELTS_T1' 
+                          const route = (assignment.exam_type === 'IELTS_T1' || assignment.exam_type === 'IELTS_T1_General')
                             ? '/ielts/task1'
                             : assignment.exam_type === 'IELTS_T2'
                             ? '/ielts/task2'
@@ -445,6 +445,7 @@ const CombinedAssignment = () => {
                               assignmentImageUrl: assignment.image_url,
                               assignmentMinWords: assignment.min_word_count,
                               assignmentMaxWords: assignment.max_word_count,
+                              assignmentExamType: assignment.exam_type, // Pass exam_type to help detect General mode
                               isClubbed: true,
                               groupId: dataToUse.groupId,
                               sharedTimer: {
@@ -457,7 +458,7 @@ const CombinedAssignment = () => {
                         }}
                         className="w-full"
                       >
-                        Open {assignment.exam_type === 'IELTS_T1' ? 'Task 1' : 
+                        Open {(assignment.exam_type === 'IELTS_T1' || assignment.exam_type === 'IELTS_T1_General') ? 'Task 1' : 
                                assignment.exam_type === 'IELTS_T2' ? 'Task 2' : 
                                'GRE'} Editor
                       </Button>

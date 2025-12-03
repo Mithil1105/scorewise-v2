@@ -24,15 +24,6 @@ export function EssayViewer({ essay, open, onOpenChange }: EssayViewerProps) {
   const [isShared, setIsShared] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  if (!essay) return null;
-
-  // Check if essay is shared with teacher
-  useEffect(() => {
-    if (open && essay?.cloudId && user && activeInstitution) {
-      checkSharedStatus();
-    }
-  }, [open, essay?.cloudId, user, activeInstitution]);
-
   const checkSharedStatus = async () => {
     if (!essay?.cloudId) return;
     
@@ -50,6 +41,17 @@ export function EssayViewer({ essay, open, onOpenChange }: EssayViewerProps) {
       console.error('Error checking shared status:', err);
     }
   };
+
+  // Check if essay is shared with teacher
+  useEffect(() => {
+    if (open && essay?.cloudId && user && activeInstitution) {
+      checkSharedStatus();
+    }
+  }, [open, essay?.cloudId, user, activeInstitution]);
+
+  if (!essay) return null;
+
+  if (!essay) return null;
 
   const handleShareWithTeacher = async () => {
     if (!essay?.cloudId || !user || !activeInstitution || !activeMembership) {

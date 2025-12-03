@@ -93,7 +93,7 @@ export function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProps) {
           <Button
             variant="outline"
             className={cn('w-full gap-2', collapsed && 'px-2')}
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/essay', { replace: true })}
           >
             <ExternalLink className="h-4 w-4" />
             {!collapsed && <span>Go to ScoreWise</span>}

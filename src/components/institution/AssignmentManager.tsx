@@ -210,6 +210,9 @@ export function AssignmentManager() {
       setAvailableTopics(getAllTopics());
     } else if (newAssignment.exam_type === 'IELTS_T1') {
       setAvailableTopics(ieltsTask1Questions);
+    } else if (newAssignment.exam_type === 'IELTS_T1_General') {
+      // General Task 1 uses custom topics, so no predefined topics needed
+      setAvailableTopics([]);
     } else if (newAssignment.exam_type === 'IELTS_T2') {
       setAvailableTopics(ieltsTask2Topics);
     } else {
@@ -756,7 +759,12 @@ export function AssignmentManager() {
                           </SelectItem>
                           <SelectItem value="IELTS_T1">
                             <span className="flex items-center gap-2">
-                              <FileText className="h-4 w-4" /> IELTS Task 1
+                              <FileText className="h-4 w-4" /> IELTS Task 1 (Academic)
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="IELTS_T1_General">
+                            <span className="flex items-center gap-2">
+                              <FileText className="h-4 w-4" /> IELTS Task 1 (General)
                             </span>
                           </SelectItem>
                           <SelectItem value="IELTS_T2">
@@ -866,6 +874,7 @@ export function AssignmentManager() {
                   
                   {/* Topic & Details Section */}
                     <div className="space-y-4 pt-4 border-t">
+                      {newAssignment.exam_type !== 'IELTS_T1_General' && (
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -882,6 +891,7 @@ export function AssignmentManager() {
                           Use predefined topic from library
                         </Label>
                       </div>
+                      )}
 
                       {newAssignment.use_predefined_topic && availableTopics.length > 0 && (
                         <div className="space-y-2">
@@ -960,6 +970,14 @@ export function AssignmentManager() {
                           </Select>
                         </div>
                       )}
+                      
+                      {newAssignment.exam_type === 'IELTS_T1_General' && (
+                        <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                          <p className="text-sm text-blue-700 dark:text-blue-300">
+                            General Task 1 is for letter writing, notes, and other written responses. No image upload needed.
+                          </p>
+                        </div>
+                      )}
 
                       <div className="space-y-2">
                         <Label htmlFor="instructions">Instructions</Label>
@@ -977,12 +995,13 @@ export function AssignmentManager() {
                         )}
                       </div>
 
-                      {/* Image Upload Section */}
+                      {/* Image Upload Section - Hidden for General Task 1 */}
+                      {newAssignment.exam_type !== 'IELTS_T1_General' && (
                       <div className="space-y-2">
                         <Label htmlFor="assignment_image">
                           Assignment Image (optional)
                           <span className="text-xs text-muted-foreground ml-2">
-                            Useful for IELTS Task 1 charts/graphs or visual prompts
+                            Useful for IELTS Task 1 (Academic) charts/graphs or visual prompts
                           </span>
                         </Label>
                         {!imagePreview ? (
@@ -1030,6 +1049,8 @@ export function AssignmentManager() {
                           </div>
                         )}
                       </div>
+                      )}
+
                     </div>
 
                   {/* Timeline & Settings Section */}
