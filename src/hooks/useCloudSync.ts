@@ -109,14 +109,16 @@ export function useCloudSync() {
     });
 
     // Prepare insert data
+    // Cloud sync ONLY updates essay_text - AI fields are updated separately via AI scoring button
     const insertData: any = {
       user_id: user.id,
       exam_type: essay.examType,
       topic: essay.topic,
       essay_text: essay.essayText, // Always include essay_text
       word_count: essay.wordCount,
-      ai_score: essay.aiScore,
-      ai_feedback: essay.aiFeedback,
+      ai_score: null, // AI scoring is optional - always null on cloud sync
+      ai_feedback: null, // AI scoring is optional - always null on cloud sync
+      ielts_subscores: null, // AI scoring is optional - always null on cloud sync
       local_id: essay.localId,
       created_at: essay.createdAt,
       updated_at: essay.updatedAt,
@@ -131,23 +133,33 @@ export function useCloudSync() {
       console.log('Setting original_essay_text on first submit');
     }
 
-    // Insert and return full row data
+    // Insert and return just the ID to avoid RLS issues
     const { data, error } = await supabase
       .from('essays')
       .insert(insertData)
-      .select('id, essay_text, original_essay_text, word_count')
+      .select('id')
       .single();
 
     if (error) {
       console.error('Error uploading essay:', error);
+      console.error('Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      toast({
+        title: 'Upload failed',
+        description: `Failed to save essay: ${error.message || 'Unknown error'}`,
+        variant: 'destructive',
+      });
       return null;
     }
 
     console.log('Draft saved to cloud:', {
       id: data.id,
       essayTextLength: essay.essayText?.length || 0,
-      wordCount: data.word_count,
-      hasOriginalText: !!data.original_essay_text,
+      wordCount: essay.wordCount,
     });
     return data?.id || null;
   }, [user, isOnline, activeMembership, activeInstitution, getUserStorageUsage, toast]);
@@ -204,13 +216,13 @@ export function useCloudSync() {
     });
 
     // Update data - never overwrite original_essay_text if it already exists
+    // Cloud sync ONLY updates essay_text - AI fields are updated separately via AI scoring button
     const updateData: any = {
       topic: essay.topic,
       essay_text: essay.essayText, // Always include essay_text
       word_count: essay.wordCount,
-      ai_score: essay.aiScore,
-      ai_feedback: essay.aiFeedback,
       updated_at: essay.updatedAt
+      // Do NOT update ai_score, ai_feedback, ielts_subscores - those are updated separately via AI scoring
       // content_size will be auto-calculated by trigger
       // original_essay_text is never updated - it's set once on first submit
     };

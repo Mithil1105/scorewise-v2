@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getRandomTopic, GRETopic } from "@/data/greTopics";
 import { exportEssayAsDocx } from "@/utils/exportEssay";
 import { Shuffle, Edit3, Download, RotateCcw, CheckCircle2, ClipboardList } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import AIScorePanel from "@/components/essay/AIScorePanel";
 import { useLocalEssays, useAutoSave } from "@/hooks/useLocalStorage";
@@ -214,12 +215,16 @@ const Essay = () => {
 
       // Build payload - ALWAYS include both topic AND essay_text
       // Ensure essay_text is never null or empty string
+      // AI fields are ALWAYS null on submission - AI scoring is optional and separate
       const payload: any = {
         user_id: user.id,
         exam_type: 'GRE',
         topic: topic.topic || '',
         essay_text: currentText || '', // ALWAYS include essay_text, never null
         word_count: calculatedWordCount || 0,
+        ai_score: null, // AI scoring is optional - always null on submission
+        ai_feedback: null, // AI scoring is optional - always null on submission
+        ielts_subscores: null, // AI scoring is optional - always null on submission
         institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
         institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null,
       };
@@ -326,12 +331,14 @@ const Essay = () => {
           });
         }
       } else {
-        // UPDATE existing essay (never overwrite original_essay_text)
+        // UPDATE existing essay (never overwrite original_essay_text or AI fields)
+        // AI fields are only updated by the separate AI scoring button
         const updatePayload = {
           essay_text: currentText,
           word_count: calculatedWordCount,
           updated_at: new Date().toISOString(),
           // Do NOT update original_essay_text - it's set once on first submit
+          // Do NOT update ai_score, ai_feedback, ielts_subscores - those are updated separately
         };
         
         console.log('UPDATE payload:', JSON.stringify(updatePayload, null, 2));
@@ -438,54 +445,167 @@ const Essay = () => {
   }, [submitEssayToCloud]);
 
   // Auto-submit assignment essay function
-  const submitAssignmentEssay = useCallback(async () => {
-    if (!assignmentData?.isAssignment || !assignmentData.assignmentId || !activeMembership || !currentLocalId) {
+  // This saves the essay FIRST, then links it to assignment_submissions
+  // AI scoring is completely separate and optional
+  // If essayId is provided, uses that instead of saving again
+  const submitAssignmentEssay = useCallback(async (providedEssayId?: string | null) => {
+    if (!assignmentData?.isAssignment || !assignmentData.assignmentId || !activeMembership) {
+      console.error('Missing assignment data:', {
+        isAssignment: assignmentData?.isAssignment,
+        assignmentId: assignmentData?.assignmentId,
+        activeMembership: !!activeMembership,
+      });
       return;
     }
 
-    // First submit the essay to cloud using unified function
-    const result = await submitEssayToCloud();
-    
-    if (!result.success || !result.essayId) {
-      // Error already shown by submitEssayToCloud
-      return;
+    console.log('Starting assignment submission:', {
+      assignmentId: assignmentData.assignmentId,
+      memberId: activeMembership.id,
+      providedEssayId: providedEssayId || 'none'
+    });
+
+    let essayId: string | null = null;
+
+    // STEP 1: Use provided essayId OR save essay to cloud FIRST
+    if (providedEssayId) {
+      console.log('Using provided essay ID:', providedEssayId);
+      essayId = providedEssayId;
+    } else {
+      // Only save if essayId not provided and we have currentLocalId
+      if (!currentLocalId) {
+        console.error('No currentLocalId and no providedEssayId - cannot save essay');
+        toast({
+          title: 'Submission error',
+          description: 'Cannot submit assignment. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      console.log('Saving essay to cloud first...');
+      const result = await submitEssayToCloud();
+      
+      console.log('Essay submission result:', result);
+      
+      if (!result.success || !result.essayId) {
+        console.error('Essay submission failed:', result);
+        // Error already shown by submitEssayToCloud
+        // Essay text is still in editor - user can retry
+        return;
+      }
+
+      essayId = result.essayId;
     }
+
+    // STEP 2: Link essay to assignment submission AFTER successful save
+    console.log('Linking essay to assignment submission:', {
+      essayId: essayId,
+      assignmentId: assignmentData.assignmentId,
+      memberId: activeMembership.id
+    });
 
     try {
       // Find or create assignment submission
       const { data: existingSubmission, error: findError } = await supabase
         .from('assignment_submissions')
-        .select('id')
+        .select('id, status')
         .eq('assignment_id', assignmentData.assignmentId)
         .eq('member_id', activeMembership.id)
         .maybeSingle();
 
-      if (findError) throw findError;
+      if (findError) {
+        console.error('Error finding existing submission:', findError);
+        // Essay is already saved - show warning but don't fail completely
+        toast({
+          title: 'Essay saved',
+          description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+          variant: 'default',
+        });
+        return;
+      }
+
+      console.log('Existing submission found:', existingSubmission);
 
       // Update or create submission
       if (existingSubmission) {
-        const { error: updateError } = await supabase
+        console.log('Updating existing submission:', existingSubmission.id);
+        const submittedAt = new Date().toISOString();
+        const { data: updatedData, error: updateError } = await supabase
           .from('assignment_submissions')
           .update({
-            essay_id: result.essayId,
+            essay_id: essayId,
             status: 'submitted',
-            submitted_at: new Date().toISOString()
+            submitted_at: submittedAt
           })
-          .eq('id', existingSubmission.id);
+          .eq('id', existingSubmission.id)
+          .select()
+          .single();
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('Error updating submission:', updateError);
+          // Essay is already saved - show warning but don't fail completely
+          toast({
+            title: 'Essay saved',
+            description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+            variant: 'default',
+          });
+          return;
+        }
+
+        // Verify the update was successful
+        if (!updatedData || updatedData.status !== 'submitted' || !updatedData.essay_id) {
+          console.error('Update verification failed:', updatedData);
+          // Try one more time with explicit status
+          const { error: retryError } = await supabase
+            .from('assignment_submissions')
+            .update({
+              essay_id: essayId,
+              status: 'submitted',
+              submitted_at: submittedAt
+            })
+            .eq('id', existingSubmission.id);
+          
+          if (retryError) {
+            console.error('Retry update also failed:', retryError);
+            toast({
+              title: 'Warning',
+              description: 'Essay was saved but status update may have failed. Please refresh and check with your teacher.',
+              variant: 'default',
+            });
+          }
+        }
+
+        console.log('Submission updated successfully:', updatedData);
+        console.log('VERIFICATION - Updated submission has essay_id:', updatedData?.essay_id);
+        console.log('VERIFICATION - Updated submission status:', updatedData?.status);
       } else {
-        const { error: insertError } = await supabase
+        console.log('Creating new submission');
+        const { data: insertedData, error: insertError } = await supabase
           .from('assignment_submissions')
           .insert({
             assignment_id: assignmentData.assignmentId,
             member_id: activeMembership.id,
-            essay_id: result.essayId,
+            essay_id: essayId,
             status: 'submitted',
             submitted_at: new Date().toISOString()
-          });
+          })
+          .select()
+          .single();
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('Error inserting submission:', insertError);
+          // Essay is already saved - show warning but don't fail completely
+          toast({
+            title: 'Essay saved',
+            description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+            variant: 'default',
+          });
+          return;
+        }
+
+        console.log('Submission created successfully:', insertedData);
+        console.log('VERIFICATION - Created submission has essay_id:', insertedData?.essay_id);
+        console.log('VERIFICATION - Created submission status:', insertedData?.status);
       }
 
       toast({
@@ -493,14 +613,70 @@ const Essay = () => {
         description: 'Your essay has been automatically submitted to your teacher.',
       });
     } catch (err: any) {
-      console.error('Error submitting assignment:', err);
+      console.error('Error submitting assignment:', {
+        error: err,
+        message: err.message,
+        details: err.details,
+        hint: err.hint,
+        code: err.code
+      });
+      // Essay is already saved - show warning but don't fail completely
       toast({
-        title: 'Submission error',
-        description: err.message || 'Failed to submit assignment. Please try again.',
-        variant: 'destructive',
+        title: 'Essay saved',
+        description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+        variant: 'default',
       });
     }
   }, [assignmentData, activeMembership, currentLocalId, submitEssayToCloud, toast]);
+
+  // Load submission status for assignments
+  const [submissionStatus, setSubmissionStatus] = useState<string | null>(null);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  useEffect(() => {
+    const loadSubmissionStatus = async () => {
+      if (!assignmentData?.isAssignment || !assignmentData.assignmentId || !activeMembership) {
+        return;
+      }
+
+      try {
+        const { data: submission, error } = await supabase
+          .from('assignment_submissions')
+          .select('status, essay_id, submitted_at')
+          .eq('assignment_id', assignmentData.assignmentId)
+          .eq('member_id', activeMembership.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading submission status:', error);
+          return;
+        }
+
+        if (submission) {
+          setSubmissionStatus(submission.status);
+          setIsSubmitted(submission.status === 'submitted' || submission.status === 'reviewed');
+          
+          // If submitted, load the essay
+          if (submission.essay_id) {
+            const { data: essayData } = await supabase
+              .from('essays')
+              .select('essay_text')
+              .eq('id', submission.essay_id)
+              .single();
+
+            if (essayData?.essay_text) {
+              setEssay(essayData.essay_text);
+              setCurrentEssayId(submission.essay_id);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error checking submission status:', err);
+      }
+    };
+
+    loadSubmissionStatus();
+  }, [assignmentData, activeMembership]);
 
   // Load assignment data if present
   useEffect(() => {
@@ -513,25 +689,27 @@ const Essay = () => {
       };
       setTopic(assignmentTopic);
       
-      // Create new local essay entry for assignment
-      const localId = crypto.randomUUID();
-      const newEssay: LocalEssay = {
-        localId,
-        examType: 'GRE',
-        topic: assignmentData.assignmentTopic,
-        essayText: '',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        wordCount: 0,
-        assignmentId: assignmentData.assignmentId
-      };
-      addEssay(newEssay);
-      setCurrentLocalId(localId);
-      setEssay('');
-      setCurrentEssayId(null); // Reset cloud ID for new assignment
+      // Only create new local essay entry if not already submitted
+      if (!isSubmitted) {
+        const localId = crypto.randomUUID();
+        const newEssay: LocalEssay = {
+          localId,
+          examType: 'GRE',
+          topic: assignmentData.assignmentTopic,
+          essayText: '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          wordCount: 0,
+          assignmentId: assignmentData.assignmentId
+        };
+        addEssay(newEssay);
+        setCurrentLocalId(localId);
+        setEssay('');
+        setCurrentEssayId(null); // Reset cloud ID for new assignment
+      }
       return;
     }
-  }, [assignmentData, addEssay]);
+  }, [assignmentData, addEssay, isSubmitted]);
 
   // Load continued essay from drafts (only if not an assignment)
   useEffect(() => {
@@ -643,17 +821,18 @@ const Essay = () => {
     setWpm(0);
   }, []);
 
-  // Timer end handler - uses unified submit function
+  // Timer end handler - saves essay FIRST, then shows dialog
+  // AI scoring is completely separate and optional
   const handleTimeEnd = useCallback(async () => {
     setIsTimerRunning(false);
     forceSave();
     
-    // Call unified submit function
+    // STEP 1: Save essay to cloud FIRST (with AI fields = null)
     const result = await submitEssayToCloud();
     
     if (!result.success) {
       // Show error - don't open results dialog
-      // Essay text remains visible in editor
+      // Essay text remains visible in editor - DO NOT clear it
       toast({
         title: "Couldn't save essay",
         description: "We couldn't save this to the cloud. Your text is still here; please retry submit.",
@@ -662,7 +841,13 @@ const Essay = () => {
       return;
     }
 
-    // Calculate final WPM
+    // STEP 2: If this is an assignment, link it to assignment_submissions
+    // Pass the essayId we just got from submitEssayToCloud
+    if (assignmentData?.isAssignment && assignmentData.assignmentId && activeMembership) {
+      await submitAssignmentEssay(result.essayId);
+    }
+
+    // STEP 3: Calculate final WPM
     let finalWpm = 0;
     if (startTime && wordCount > 0) {
       const elapsedMinutes = (Date.now() - startTime) / 60000;
@@ -674,10 +859,10 @@ const Essay = () => {
     // Update WPM state
     setWpm(finalWpm);
     
-    // Open results dialog with actual data
+    // STEP 4: Open results dialog AFTER successful save
     // Essay text remains visible in editor - DO NOT clear it
     setShowResults(true);
-  }, [forceSave, submitEssayToCloud, startTime, wordCount, toast]);
+  }, [forceSave, submitEssayToCloud, submitAssignmentEssay, assignmentData, activeMembership, startTime, wordCount, toast]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -720,15 +905,21 @@ const Essay = () => {
     setIsTimerRunning(false);
     forceSave();
     
-    // Call unified submit function
+    // STEP 1: Save essay to cloud FIRST (with AI fields = null)
     const result = await submitEssayToCloud();
     
     if (!result.success) {
-      // Error already shown
+      // Error already shown - essay text remains in editor
       return;
     }
 
-    // Calculate final WPM
+    // STEP 2: If this is an assignment, link it to assignment_submissions
+    // Pass the essayId we just got from submitEssayToCloud
+    if (assignmentData?.isAssignment && assignmentData.assignmentId && activeMembership) {
+      await submitAssignmentEssay(result.essayId);
+    }
+
+    // STEP 3: Calculate final WPM
     let finalWpm = 0;
     if (startTime && wordCount > 0) {
       const elapsedMinutes = (Date.now() - startTime) / 60000;
@@ -738,8 +929,9 @@ const Essay = () => {
     }
 
     setWpm(finalWpm);
+    // STEP 4: Show results dialog AFTER successful save
     setShowResults(true);
-  }, [forceSave, submitEssayToCloud, startTime, wordCount]);
+  }, [forceSave, submitEssayToCloud, submitAssignmentEssay, assignmentData, activeMembership, startTime, wordCount]);
 
   return (
     <PageLayout>
@@ -773,7 +965,12 @@ const Essay = () => {
                 <ClipboardList className="h-5 w-5" />
                 {assignmentData.assignmentTitle}
               </CardTitle>
-              <CardDescription>Assignment from your teacher</CardDescription>
+              <CardDescription>
+                Assignment from your teacher
+                {isSubmitted && (
+                  <Badge className="ml-2 bg-green-500">Submitted</Badge>
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
@@ -862,13 +1059,26 @@ const Essay = () => {
 
         {/* Essay Editor */}
         <div className="mb-6">
+          {isSubmitted && (
+            <div className="mb-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                This assignment has been submitted. You cannot make further edits.
+              </span>
+            </div>
+          )}
           <Textarea
             ref={textareaRef}
             value={essay}
-            onChange={(e) => setEssay(e.target.value)}
-            placeholder={isTimerRunning ? "Start typing your essay here..." : essay.trim() ? "Your essay is saved. You can continue editing..." : "Click 'Start' to begin writing..."}
+            onChange={(e) => {
+              if (!isSubmitted) {
+                setEssay(e.target.value);
+              }
+            }}
+            placeholder={isSubmitted ? "This assignment has been submitted and cannot be edited." : isTimerRunning ? "Start typing your essay here..." : essay.trim() ? "Your essay is saved. You can continue editing..." : "Click 'Start' to begin writing..."}
             className="essay-editor min-h-[500px] text-base"
-            disabled={showResults}
+            disabled={showResults || isSubmitted}
+            readOnly={isSubmitted}
             spellCheck={false}
             autoComplete="off"
             autoCorrect="off"
@@ -935,8 +1145,17 @@ const Essay = () => {
             <div className="flex gap-3">
               <Button 
                 onClick={() => {
+                  // Navigate to review page - works even if AI fields are null
                   if (currentEssayId) {
                     navigate(`/review/${currentEssayId}`);
+                  } else if (currentLocalId) {
+                    // Try to get cloudId from local essay
+                    const localEssay = getEssay(currentLocalId);
+                    if (localEssay?.cloudId) {
+                      navigate(`/review/${localEssay.cloudId}`);
+                    } else {
+                      navigate('/drafts');
+                    }
                   } else {
                     navigate('/drafts');
                   }

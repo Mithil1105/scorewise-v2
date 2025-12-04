@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useInstitution } from '@/contexts/InstitutionContext';
@@ -110,6 +111,7 @@ interface Submission {
 }
 
 export function AssignmentManager() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { activeInstitution } = useInstitution();
   const { toast } = useToast();
@@ -587,42 +589,89 @@ export function AssignmentManager() {
     setLoadingSubmissions(true);
     
     try {
-      // Fetch submissions
+      // SIMPLE APPROACH: Fetch all submissions first, then enrich with member/essay data
+      // This is the most reliable way to ensure we see all submissions
       const { data: submissionsData, error: submissionsError } = await supabase
         .from('assignment_submissions')
         .select('*')
         .eq('assignment_id', assignmentId)
         .order('submitted_at', { ascending: false, nullsFirst: true });
 
-      if (submissionsError) throw submissionsError;
+      if (submissionsError) {
+        console.error('Error fetching submissions:', submissionsError);
+        toast({ 
+          title: 'Error', 
+          description: 'Failed to load submissions: ' + submissionsError.message,
+          variant: 'destructive' 
+        });
+        setSubmissions([]);
+        setLoadingSubmissions(false);
+        return;
+      }
 
       if (!submissionsData || submissionsData.length === 0) {
         setSubmissions([]);
+        setLoadingSubmissions(false);
+        return;
+      }
+
+      console.log('Fetched submissions:', submissionsData.length, submissionsData);
+      // Log each submission's key fields for debugging
+      submissionsData.forEach((sub, idx) => {
+        console.log(`Submission ${idx + 1}:`, {
+          id: sub.id,
+          member_id: sub.member_id,
+          essay_id: sub.essay_id,
+          status: sub.status,
+          submitted_at: sub.submitted_at,
+          assignment_id: sub.assignment_id
+        });
+      });
+
+      // Get all unique member IDs from submissions
+      const memberIds = [...new Set(submissionsData.map(s => s.member_id).filter(Boolean))];
+      
+      if (memberIds.length === 0) {
+        setSubmissions([]);
+        setLoadingSubmissions(false);
         return;
       }
 
       // Fetch member details
-      const memberIds = submissionsData.map(s => s.member_id);
       const { data: membersData, error: membersError } = await supabase
         .from('institution_members')
         .select('id, user_id')
         .in('id', memberIds);
 
-      if (membersError) throw membersError;
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+        throw membersError;
+      }
+
+      if (!membersData || membersData.length === 0) {
+        setSubmissions([]);
+        setLoadingSubmissions(false);
+        return;
+      }
 
       // Fetch profiles for the members
-      const userIds = membersData?.map(m => m.user_id) || [];
+      const userIds = membersData.map(m => m.user_id);
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('user_id, display_name, avatar_url')
         .in('user_id', userIds);
 
-      if (profilesError) throw profilesError;
+      if (profilesError) {
+        console.error('Error fetching profiles:', profilesError);
+        // Don't throw - we can still show submissions without profiles
+      }
 
-      // Fetch essays if they exist
+      // Fetch essays if they exist - CRITICAL for showing essay content
       const essayIds = submissionsData
         .map(s => s.essay_id)
-        .filter((id): id is string => id !== null);
+        .filter((id): id is string => id !== null && id !== undefined);
+      
+      console.log('Essay IDs to fetch:', essayIds);
       
       let essaysData: any[] = [];
       if (essayIds.length > 0) {
@@ -633,24 +682,68 @@ export function AssignmentManager() {
 
         if (essaysError) {
           console.error('Error fetching essays:', essaysError);
+          console.error('Essay fetch error details:', {
+            message: essaysError.message,
+            details: essaysError.details,
+            hint: essaysError.hint,
+            code: essaysError.code
+          });
+          // Don't throw - we can still show submissions without essay text
+          // But log it so we can debug RLS issues
         } else {
           essaysData = essays || [];
+          console.log(`Successfully fetched ${essaysData.length} out of ${essayIds.length} essays`);
+          if (essaysData.length < essayIds.length) {
+            const fetchedIds = new Set(essaysData.map(e => e.id));
+            const missingIds = essayIds.filter(id => !fetchedIds.has(id));
+            console.warn('Some essays could not be fetched (possibly RLS):', missingIds);
+          }
         }
+      } else {
+        console.log('No essay IDs found in submissions');
       }
 
       // Create maps for easy lookup
-      const memberMap = new Map(membersData?.map(m => [m.id, m]) || []);
-      const profileMap = new Map(profilesData?.map(p => [p.user_id, p]) || []);
+      const memberMap = new Map(membersData.map(m => [m.id, m]));
+      const profileMap = new Map((profilesData || []).map(p => [p.user_id, p]));
       const essayMap = new Map(essaysData.map(e => [e.id, e]));
 
-      // Enrich submissions with member and profile data
+      // Enrich submissions with member, profile, and essay data
       const enrichedSubmissions = submissionsData.map(submission => {
         const member = memberMap.get(submission.member_id);
         const profile = member ? profileMap.get(member.user_id) : null;
         const essay = submission.essay_id ? essayMap.get(submission.essay_id) : null;
 
+        // CRITICAL: If essay_id exists, this is definitely submitted
+        // Force status to 'submitted' if essay_id exists (unless already reviewed)
+        let finalStatus = submission.status;
+        if (submission.essay_id) {
+          if (submission.status === 'reviewed') {
+            finalStatus = 'reviewed';
+          } else {
+            // Force to submitted if essay_id exists
+            finalStatus = 'submitted';
+            // Also ensure submitted_at is set if missing
+            if (!submission.submitted_at) {
+              submission.submitted_at = submission.created_at || new Date().toISOString();
+            }
+          }
+        }
+
+        console.log('Enriching submission:', {
+          id: submission.id,
+          member_id: submission.member_id,
+          essay_id: submission.essay_id,
+          original_status: submission.status,
+          final_status: finalStatus,
+          has_essay_data: !!essay
+        });
+
         return {
           ...submission,
+          status: finalStatus,
+          // Ensure essay_id is always included
+          essay_id: submission.essay_id || null,
           member: member ? {
             user_id: member.user_id,
             profile: profile || null
@@ -659,6 +752,17 @@ export function AssignmentManager() {
         };
       });
 
+      // Sort: submitted first, then by submitted_at
+      enrichedSubmissions.sort((a, b) => {
+        if (a.submitted_at && !b.submitted_at) return -1;
+        if (!a.submitted_at && b.submitted_at) return 1;
+        if (a.submitted_at && b.submitted_at) {
+          return new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
+        }
+        return 0;
+      });
+
+      console.log('Enriched submissions:', enrichedSubmissions);
       setSubmissions(enrichedSubmissions as Submission[]);
     } catch (err: any) {
       console.error('Error fetching submissions:', err);
@@ -667,6 +771,7 @@ export function AssignmentManager() {
         description: err.message || 'Failed to load submissions',
         variant: 'destructive' 
       });
+      setSubmissions([]);
     } finally {
       setLoadingSubmissions(false);
     }
@@ -1535,35 +1640,85 @@ export function AssignmentManager() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge 
-                          variant={
-                            submission.status === 'submitted' ? 'default' :
-                            submission.status === 'reviewed' ? 'default' :
-                            submission.status === 'in_progress' ? 'outline' :
-                            'secondary'
+                        {(() => {
+                          // CRITICAL: Determine actual status - prioritize essay_id over stored status
+                          // If essay_id exists, it MUST be submitted (unless reviewed)
+                          const hasEssayId = !!submission.essay_id;
+                          const storedStatus = submission.status || 'pending';
+                          const isReviewed = storedStatus === 'reviewed';
+                          
+                          // If essay_id exists, it's definitely submitted (unless reviewed)
+                          const isSubmitted = hasEssayId || storedStatus === 'submitted';
+                          
+                          let statusText = 'Not Started';
+                          let variant: 'default' | 'outline' | 'secondary' = 'secondary';
+                          let className = '';
+                          
+                          if (isReviewed) {
+                            statusText = 'Reviewed';
+                            variant = 'default';
+                            className = 'bg-green-500';
+                          } else if (isSubmitted) {
+                            statusText = 'Submitted';
+                            variant = 'default';
+                            className = 'bg-blue-500';
+                          } else if (storedStatus === 'in_progress') {
+                            statusText = 'In Progress';
+                            variant = 'outline';
+                          } else if (storedStatus === 'not_started') {
+                            statusText = 'Not Started';
+                            variant = 'secondary';
+                          } else {
+                            statusText = 'Pending';
+                            variant = 'secondary';
                           }
-                          className={
-                            submission.status === 'reviewed' ? 'bg-green-500' : ''
+                          
+                          // Debug log if status seems wrong
+                          if (hasEssayId && !isSubmitted && !isReviewed) {
+                            console.warn('Status mismatch detected:', {
+                              submission_id: submission.id,
+                              essay_id: submission.essay_id,
+                              stored_status: storedStatus,
+                              displayed_status: statusText
+                            });
                           }
-                        >
-                          {submission.status === 'submitted' ? 'Submitted' :
-                           submission.status === 'reviewed' ? 'Reviewed' :
-                           submission.status === 'in_progress' ? 'In Progress' :
-                           'Pending'}
-                        </Badge>
+                          
+                          return (
+                            <Badge variant={variant} className={className}>
+                              {statusText}
+                            </Badge>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
-                        {submission.submitted_at ? (
-                          <span className="text-sm">
-                            {format(new Date(submission.submitted_at), 'MMM d, yyyy h:mm a')}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">Not submitted</span>
-                        )}
+                        {(() => {
+                          // If essay_id exists, it's definitely submitted
+                          const hasEssayId = !!submission.essay_id;
+                          const hasSubmittedAt = !!submission.submitted_at;
+                          
+                          if (hasSubmittedAt) {
+                            return (
+                              <span className="text-sm">
+                                {format(new Date(submission.submitted_at), 'MMM d, yyyy h:mm a')}
+                              </span>
+                            );
+                          } else if (hasEssayId) {
+                            // Has essay but no timestamp - still submitted
+                            return (
+                              <span className="text-sm text-muted-foreground">Submitted</span>
+                            );
+                          } else {
+                            return (
+                              <span className="text-muted-foreground text-sm">Not submitted</span>
+                            );
+                          }
+                        })()}
                       </TableCell>
                       <TableCell>
                         {submission.essay?.word_count ? (
                           <span className="text-sm">{submission.essay.word_count} words</span>
+                        ) : submission.essay_id ? (
+                          <span className="text-sm text-muted-foreground">Loading...</span>
                         ) : (
                           <span className="text-muted-foreground text-sm">-</span>
                         )}
@@ -1580,17 +1735,33 @@ export function AssignmentManager() {
                           variant="ghost" 
                           size="sm"
                           onClick={() => {
-                            if (submission.essay?.id) {
-                              // Navigate to assignment essay review page
-                              window.open(`/institution/review-essay/${submission.essay.id}`, '_blank');
+                            // CRITICAL: Check essay_id first - if it exists, navigate to essay
+                            if (submission.essay_id) {
+                              console.log('Navigating to essay:', submission.essay_id);
+                              // Navigate to review assignment essay page - it handles RLS properly
+                              navigate(`/institution/review-essay/${submission.essay_id}`);
                             } else {
-                              toast({ 
-                                title: 'No essay', 
-                                description: 'Student has not submitted an essay yet.',
-                                variant: 'destructive' 
-                              });
+                              // No essay_id - check if status suggests it should exist
+                              const hasEssayId = !!submission.essay_id;
+                              const isSubmitted = hasEssayId || submission.status === 'submitted' || submission.status === 'reviewed';
+                              
+                              if (isSubmitted && !hasEssayId) {
+                                // Status says submitted but no essay_id - data issue
+                                toast({ 
+                                  title: 'Essay not found', 
+                                  description: 'The submission is marked as submitted but the essay link is missing. The essay may still be processing. Please refresh the page.',
+                                  variant: 'destructive' 
+                                });
+                              } else {
+                                toast({ 
+                                  title: 'No essay', 
+                                  description: 'Student has not submitted an essay yet.',
+                                  variant: 'destructive' 
+                                });
+                              }
                             }
                           }}
+                          disabled={!submission.essay_id}
                         >
                           <Eye className="h-4 w-4 mr-1" />
                           View Essay

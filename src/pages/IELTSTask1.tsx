@@ -147,15 +147,24 @@ const IELTSTask1 = () => {
           wordCount: updatedEssay.wordCount,
           storageSizeKb,
         });
-        // Upload essay to cloud
-        essayId = await uploadEssay(updatedEssay);
+        // Upload essay to cloud - pass isFirstSubmit=true if no cloudId exists
+        const isFirstSubmit = !updatedEssay.cloudId;
+        essayId = await uploadEssay(updatedEssay, isFirstSubmit);
         if (essayId) {
           updateEssay(currentLocalId, { cloudId: essayId });
+          console.log('Essay uploaded successfully, essayId:', essayId);
+        } else {
+          console.error('uploadEssay returned null - essay upload failed');
         }
       }
 
       if (!essayId) {
         console.error('Could not save essay to cloud');
+        toast({
+          title: 'Submission error',
+          description: 'Could not save essay to cloud. Please try again.',
+          variant: 'destructive',
+        });
         return;
       }
 
@@ -167,22 +176,74 @@ const IELTSTask1 = () => {
         .eq('member_id', activeMembership.id)
         .maybeSingle();
 
-      if (findError) throw findError;
+      if (findError) {
+        console.error('Error finding existing submission:', findError);
+        // Essay is already saved - show warning but don't fail completely
+        toast({
+          title: 'Essay saved',
+          description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+          variant: 'default',
+        });
+        return;
+      }
 
       // Update or create submission
       if (existingSubmission) {
-        const { error: updateError } = await supabase
+        const submittedAt = new Date().toISOString();
+        const { data: updatedData, error: updateError } = await supabase
           .from('assignment_submissions')
           .update({
             essay_id: essayId,
             status: 'submitted',
-            submitted_at: new Date().toISOString()
+            submitted_at: submittedAt
           })
-          .eq('id', existingSubmission.id);
+          .eq('id', existingSubmission.id)
+          .select('id, essay_id, status, submitted_at, assignment_id, member_id')
+          .single();
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('Error updating submission:', updateError);
+          // Essay is already saved - show warning but don't fail completely
+          toast({
+            title: 'Essay saved',
+            description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+            variant: 'default',
+          });
+          return;
+        }
+
+        // Verify the update was successful
+        console.log('VERIFICATION - Updated submission:', updatedData);
+        console.log('VERIFICATION - Updated submission has essay_id:', updatedData?.essay_id);
+        console.log('VERIFICATION - Updated submission status:', updatedData?.status);
+        
+        if (!updatedData || updatedData.status !== 'submitted' || !updatedData.essay_id) {
+          console.error('Update verification failed:', updatedData);
+          // Try one more time with explicit status
+          const { error: retryError } = await supabase
+            .from('assignment_submissions')
+            .update({
+              essay_id: essayId,
+              status: 'submitted',
+              submitted_at: submittedAt
+            })
+            .eq('id', existingSubmission.id);
+          
+          if (retryError) {
+            console.error('Retry update also failed:', retryError);
+            toast({
+              title: 'Warning',
+              description: 'Essay was saved but status update may have failed. Please refresh and check with your teacher.',
+              variant: 'default',
+            });
+          } else {
+            console.log('Retry update succeeded');
+          }
+        } else {
+          console.log('SUCCESS - Submission updated correctly with essay_id:', updatedData.essay_id);
+        }
       } else {
-        const { error: insertError } = await supabase
+        const { data: insertedData, error: insertError } = await supabase
           .from('assignment_submissions')
           .insert({
             assignment_id: assignmentData.assignmentId,
@@ -190,9 +251,31 @@ const IELTSTask1 = () => {
             essay_id: essayId,
             status: 'submitted',
             submitted_at: new Date().toISOString()
-          });
+          })
+          .select('id, essay_id, status, submitted_at, assignment_id, member_id')
+          .single();
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('Error inserting submission:', insertError);
+          console.error('Insert error details:', {
+            message: insertError.message,
+            details: insertError.details,
+            hint: insertError.hint,
+            code: insertError.code
+          });
+          // Essay is already saved - show warning but don't fail completely
+          toast({
+            title: 'Essay saved',
+            description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+            variant: 'default',
+          });
+          return;
+        }
+        
+        console.log('VERIFICATION - Created submission:', insertedData);
+        console.log('VERIFICATION - Created submission has essay_id:', insertedData?.essay_id);
+        console.log('VERIFICATION - Created submission status:', insertedData?.status);
+        console.log('SUCCESS - Submission created with essay_id:', insertedData?.essay_id);
       }
 
       toast({
@@ -201,10 +284,11 @@ const IELTSTask1 = () => {
       });
     } catch (err: any) {
       console.error('Error submitting assignment:', err);
+      // Essay might be saved - show warning but don't fail completely
       toast({
-        title: 'Submission error',
-        description: err.message || 'Failed to submit assignment. Please try again.',
-        variant: 'destructive',
+        title: 'Essay saved',
+        description: 'Your essay was saved, but there was an error linking it to the assignment. Please contact your teacher.',
+        variant: 'default',
       });
     }
   }, [assignmentData, activeMembership, currentLocalId, essay, getEssay, user, isOnline, uploadEssay, updateEssay, toast]);
@@ -386,6 +470,54 @@ const IELTSTask1 = () => {
     }
   }, [assignmentData, getEssay, getImagesForEssay]);
 
+  // Load submission status for assignments
+  const [submissionStatus, setSubmissionStatus] = useState<string | null>(null);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  useEffect(() => {
+    const loadSubmissionStatus = async () => {
+      if (!assignmentData?.isAssignment || !assignmentData.assignmentId || !activeMembership) {
+        return;
+      }
+
+      try {
+        const { data: submission, error } = await supabase
+          .from('assignment_submissions')
+          .select('status, essay_id, submitted_at')
+          .eq('assignment_id', assignmentData.assignmentId)
+          .eq('member_id', activeMembership.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading submission status:', error);
+          return;
+        }
+
+        if (submission) {
+          setSubmissionStatus(submission.status);
+          setIsSubmitted(submission.status === 'submitted' || submission.status === 'reviewed');
+          
+          // If submitted, load the essay
+          if (submission.essay_id) {
+            const { data: essayData } = await supabase
+              .from('essays')
+              .select('essay_text')
+              .eq('id', submission.essay_id)
+              .single();
+
+            if (essayData?.essay_text) {
+              setEssay(essayData.essay_text);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error checking submission status:', err);
+      }
+    };
+
+    loadSubmissionStatus();
+  }, [assignmentData, activeMembership]);
+
   const handleGenerateQuestion = useCallback(async () => {
     // Fetch random question from database
     const { data, error } = await supabase
@@ -517,6 +649,15 @@ const IELTSTask1 = () => {
   }, [toast, addEssay, addImage, user, isOnline, uploadImage]);
 
   const handleStart = useCallback(() => {
+    if (isSubmitted) {
+      toast({
+        title: "Cannot start",
+        description: "This assignment has already been submitted.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Check if we have a valid topic/question based on mode
     const hasValidTopic = mode === "general" 
       ? generalTopic !== null
@@ -538,7 +679,7 @@ const IELTSTask1 = () => {
       setStartTime(Date.now());
     }
     textareaRef.current?.focus();
-  }, [mode, question, customImage, cloudImageUrl, generalTopic, assignmentData, startTime, toast]);
+  }, [mode, question, customImage, cloudImageUrl, generalTopic, assignmentData, startTime, toast, isSubmitted]);
 
   const handleToggle = useCallback(() => {
     if (isRunning) {
@@ -722,7 +863,12 @@ const IELTSTask1 = () => {
                 <ClipboardList className="h-5 w-5" />
                 {assignmentData.assignmentTitle}
               </CardTitle>
-              <CardDescription>Assignment from your teacher</CardDescription>
+              <CardDescription>
+                Assignment from your teacher
+                {isSubmitted && (
+                  <Badge className="ml-2 bg-green-500">Submitted</Badge>
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
@@ -1007,13 +1153,26 @@ const IELTSTask1 = () => {
                 </div>
               </div>
               <div className="flex-1 overflow-hidden">
+                {isSubmitted && (
+                  <div className="p-3 bg-green-500/10 border-b border-green-500/20 flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    <span className="text-xs font-medium text-green-700 dark:text-green-300">
+                      Submitted - Cannot edit
+                    </span>
+                  </div>
+                )}
                 <Textarea
                   ref={textareaRef}
                   value={essay}
-                  onChange={(e) => setEssay(e.target.value)}
-                  placeholder={isRunning ? "Start writing your response here..." : "Click 'Start' to begin writing..."}
+                  onChange={(e) => {
+                    if (!isSubmitted) {
+                      setEssay(e.target.value);
+                    }
+                  }}
+                  placeholder={isSubmitted ? "This assignment has been submitted and cannot be edited." : isRunning ? "Start writing your response here..." : "Click 'Start' to begin writing..."}
                   className="h-full w-full text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50 border-0 rounded-none"
-                  disabled={showResults || !isRunning}
+                  disabled={showResults || !isRunning || isSubmitted}
+                  readOnly={isSubmitted}
                   spellCheck={false}
                   autoComplete="off"
                   autoCorrect="off"
@@ -1047,13 +1206,26 @@ const IELTSTask1 = () => {
         ) : mode === "academic" ? (
           /* Fallback: Regular Editor when no image/question (Academic) */
           <div className="mb-8">
+            {isSubmitted && (
+              <div className="mb-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                  This assignment has been submitted. You cannot make further edits.
+                </span>
+              </div>
+            )}
             <Textarea
               ref={textareaRef}
               value={essay}
-              onChange={(e) => setEssay(e.target.value)}
-              placeholder={isRunning ? "Start writing your response here..." : "Click 'Start' to begin writing..."}
+              onChange={(e) => {
+                if (!isSubmitted) {
+                  setEssay(e.target.value);
+                }
+              }}
+              placeholder={isSubmitted ? "This assignment has been submitted and cannot be edited." : isRunning ? "Start writing your response here..." : "Click 'Start' to begin writing..."}
               className="min-h-[500px] md:min-h-[600px] text-base md:text-lg leading-relaxed p-4 md:p-6 resize-none focus:ring-2 focus:ring-primary/50"
-              disabled={showResults || !isRunning}
+              disabled={showResults || !isRunning || isSubmitted}
+              readOnly={isSubmitted}
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"

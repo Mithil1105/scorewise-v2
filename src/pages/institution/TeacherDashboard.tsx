@@ -127,18 +127,38 @@ export default function TeacherDashboard() {
       if (userIds.length > 0) {
         try {
           // Use RPC function to get emails from auth.users
-          const { data: userEmails, error: emailError } = await supabase
-            .rpc('get_user_emails', { user_ids: userIds });
+          // Try the safe version first, fallback to regular version
+          let userEmails: any[] | null = null;
+          let emailError: any = null;
           
-          if (!emailError && userEmails) {
-            userEmails.forEach((ue: { user_id: string; email: string }) => {
-              if (ue.email) {
+          try {
+            const result = await supabase.rpc('get_user_emails_safe', { user_ids: userIds });
+            userEmails = result.data;
+            emailError = result.error;
+          } catch (e) {
+            // Fallback to regular function
+            try {
+              const result = await supabase.rpc('get_user_emails', { user_ids: userIds });
+              userEmails = result.data;
+              emailError = result.error;
+            } catch (e2) {
+              emailError = e2;
+            }
+          }
+          
+          if (!emailError && userEmails && Array.isArray(userEmails)) {
+            userEmails.forEach((ue: any) => {
+              if (ue && ue.user_id && ue.email) {
                 emailMap.set(ue.user_id, ue.email);
               }
             });
+          } else if (emailError) {
+            // Silently fail - emails are optional
+            console.log('Could not fetch emails (non-critical):', emailError.message || emailError);
           }
-        } catch (err) {
-          console.log('Could not fetch emails:', err);
+        } catch (err: any) {
+          // Silently fail - emails are optional for display
+          console.log('Could not fetch emails (non-critical):', err?.message || err);
         }
       }
 
@@ -160,8 +180,9 @@ export default function TeacherDashboard() {
       // Fetch assignments
       const { data: assignments } = await supabase
         .from('assignments')
-        .select('id, status')
-        .eq('institution_id', activeInstitution.id);
+        .select('id')
+        .eq('institution_id', activeInstitution.id)
+        .eq('is_active', true);
 
       // Fetch pending submissions
       const { data: submissions } = await supabase
