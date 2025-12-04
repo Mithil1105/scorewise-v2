@@ -108,30 +108,51 @@ export function useCloudSync() {
       isFirstSubmit,
     });
 
-    // Prepare insert data
-    // Cloud sync ONLY updates essay_text - AI fields are updated separately via AI scoring button
+    // Prepare insert data - EXACTLY match Task 2's working approach
+    // Only include fields that exist in the database schema
+    // Note: Task 2 uses 'IELTS-Task2' and it works, so we keep the same format
     const insertData: any = {
       user_id: user.id,
-      exam_type: essay.examType,
-      topic: essay.topic,
-      essay_text: essay.essayText, // Always include essay_text
-      word_count: essay.wordCount,
+      exam_type: essay.examType, // Keep original format - Task 2 uses 'IELTS-Task2' successfully
+      topic: essay.topic || '',
+      essay_text: essay.essayText || '', // Always include essay_text, never null
+      word_count: essay.wordCount || 0,
       ai_score: null, // AI scoring is optional - always null on cloud sync
       ai_feedback: null, // AI scoring is optional - always null on cloud sync
-      ielts_subscores: null, // AI scoring is optional - always null on cloud sync
-      local_id: essay.localId,
-      created_at: essay.createdAt,
-      updated_at: essay.updatedAt,
-      storage_size_kb: storageSizeKb, // Set storage size (trigger will also calculate)
+      ielts_subscores: null, // AI scoring is optional - always null on cloud sync (Task 2 includes this)
       institution_id: activeMembership?.status === 'active' ? activeInstitution?.id : null,
       institution_member_id: activeMembership?.status === 'active' ? activeMembership?.id : null,
+      // Note: local_id is optional and will be removed if null
+      local_id: essay.localId || null,
     };
-
+    
     // Only set original_essay_text on first submit (when it doesn't exist yet)
     if (isFirstSubmit && essay.essayText) {
       insertData.original_essay_text = essay.essayText;
       console.log('Setting original_essay_text on first submit');
     }
+    
+    // Remove any null/undefined values that might cause issues (but keep empty strings)
+    // This matches Task 2's approach exactly
+    Object.keys(insertData).forEach(key => {
+      if (insertData[key] === null || insertData[key] === undefined) {
+        delete insertData[key];
+      }
+    });
+
+    // Final validation - ensure essay_text is present
+    if (!insertData.essay_text || insertData.essay_text.length === 0) {
+      console.error('ERROR: essay_text is empty in insertData!', insertData);
+      toast({
+        title: 'Upload failed',
+        description: 'Essay text is empty. Cannot upload.',
+        variant: 'destructive',
+      });
+      return null;
+    }
+
+    // Log the exact payload being sent
+    console.log('Final insert payload:', JSON.stringify(insertData, null, 2));
 
     // Insert and return just the ID to avoid RLS issues
     const { data, error } = await supabase
@@ -146,11 +167,24 @@ export function useCloudSync() {
         message: error.message,
         details: error.details,
         hint: error.hint,
-        code: error.code
+        code: error.code,
+        fullError: error
       });
+      console.error('Failed payload was:', JSON.stringify(insertData, null, 2));
       toast({
         title: 'Upload failed',
-        description: `Failed to save essay: ${error.message || 'Unknown error'}`,
+        description: `Failed to save essay: ${error.message || 'Unknown error'}. Check console for details.`,
+        variant: 'destructive',
+      });
+      return null;
+    }
+
+    if (!data || !data.id) {
+      console.error('Insert succeeded but no ID returned');
+      console.error('Response data:', data);
+      toast({
+        title: 'Upload failed',
+        description: 'Essay upload succeeded but no ID was returned. Please try again.',
         variant: 'destructive',
       });
       return null;
