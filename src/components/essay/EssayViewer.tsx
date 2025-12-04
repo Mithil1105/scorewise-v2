@@ -63,6 +63,22 @@ export function EssayViewer({ essay, open, onOpenChange }: EssayViewerProps) {
       return;
     }
 
+    // Check if this essay is part of an assignment submission
+    const { data: submission } = await supabase
+      .from('assignment_submissions')
+      .select('id')
+      .eq('essay_id', essay.cloudId)
+      .maybeSingle();
+
+    if (submission) {
+      toast({
+        title: 'Cannot share assignment essay',
+        description: 'Assignment essays are automatically visible to your teacher. No need to share separately.',
+        variant: 'default',
+      });
+      return;
+    }
+
     setSharing(true);
     try {
       const { error } = await supabase

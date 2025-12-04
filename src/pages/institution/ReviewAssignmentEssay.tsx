@@ -106,9 +106,10 @@ export default function ReviewAssignmentEssay() {
       setIsLoading(true);
       try {
         // Fetch essay with AI review data
+        // Include institution fields to help with RLS
         const { data: essayData, error: essayError } = await supabase
           .from('essays')
-          .select('id, essay_text, exam_type, topic, ai_score, ai_feedback')
+          .select('id, essay_text, exam_type, topic, ai_score, ai_feedback, institution_id, institution_member_id, user_id')
           .eq('id', essayId)
           .maybeSingle();
 

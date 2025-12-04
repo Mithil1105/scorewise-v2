@@ -1,4 +1,4 @@
-import { Home, PenLine, Keyboard, BookOpen, GraduationCap } from "lucide-react";
+import { Home, PenLine, Keyboard, BookOpen, GraduationCap, CheckSquare } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -8,6 +8,7 @@ const navItems = [
   { to: "/ielts", icon: GraduationCap, label: "IELTS" },
   { to: "/typing", icon: Keyboard, label: "Typing" },
   { to: "/vocabulary", icon: BookOpen, label: "Vocab" },
+  { to: "/grammar", icon: CheckSquare, label: "Grammar" },
 ];
 
 export const BottomNav = () => {

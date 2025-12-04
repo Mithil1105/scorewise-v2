@@ -16,6 +16,9 @@ import WordDetail from "./pages/WordDetail";
 import IELTSHome from "./pages/IELTSHome";
 import IELTSTask1 from "./pages/IELTSTask1";
 import IELTSTask2 from "./pages/IELTSTask2";
+import GrammarDashboard from "./pages/grammar/GrammarDashboard";
+import TopicDetail from "./pages/grammar/TopicDetail";
+import AssignmentDetail from "./pages/grammar/AssignmentDetail";
 import Auth from "./pages/Auth";
 import Drafts from "./pages/Drafts";
 import AccessDenied from "./pages/AccessDenied";
@@ -41,6 +44,16 @@ import ViewReviewedEssay from "./pages/institution/ViewReviewedEssay";
 import GradingPage from "./pages/institution/GradingPage";
 import CombinedAssignment from "./pages/institution/CombinedAssignment";
 import StudentProfile from "./pages/institution/StudentProfile";
+import TeacherGrammarDashboard from "./pages/teacher/grammar/GrammarDashboard";
+import TopicsManager from "./pages/teacher/grammar/TopicsManager";
+import CreateTopic from "./pages/teacher/grammar/CreateTopic";
+import CreateExercises from "./pages/teacher/grammar/CreateExercises";
+import QuickAddExercises from "./pages/teacher/grammar/QuickAddExercises";
+import PromptGenerator from "./pages/teacher/grammar/PromptGenerator";
+import ViewAllExercises from "./pages/teacher/grammar/ViewAllExercises";
+import CreateAssignment from "./pages/teacher/grammar/CreateAssignment";
+import DailySettings from "./pages/teacher/grammar/DailySettings";
+import Progress from "./pages/teacher/grammar/Progress";
 import NotFound from "./pages/NotFound";
 import Contact from "./pages/legal/contact";
 import Privacy from "./pages/legal/privacy";
@@ -71,6 +84,9 @@ const App = () => (
               <Route path="/ielts" element={<IELTSHome />} />
               <Route path="/ielts/task1" element={<IELTSTask1 />} />
               <Route path="/ielts/task2" element={<IELTSTask2 />} />
+              <Route path="/grammar" element={<GrammarDashboard />} />
+              <Route path="/grammar/topic/:type/:topicId" element={<TopicDetail />} />
+              <Route path="/grammar/assignment/:assignmentId" element={<AssignmentDetail />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/drafts" element={<Drafts />} />
               <Route path="/profile" element={<Profile />} />
@@ -138,6 +154,58 @@ const App = () => (
                           <StudentProfile />
                         </ProtectedRoute>
                       } />
+                      
+                      {/* Teacher Grammar Routes - Protected */}
+              <Route path="/teacher/grammar" element={
+                <ProtectedRoute>
+                  <TeacherGrammarDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/topics" element={
+                <ProtectedRoute>
+                  <TopicsManager />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/topics/new" element={
+                <ProtectedRoute>
+                  <CreateTopic />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/exercises/new" element={
+                <ProtectedRoute>
+                  <CreateExercises />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/quick-add" element={
+                <ProtectedRoute>
+                  <QuickAddExercises />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/prompt-generator" element={
+                <ProtectedRoute>
+                  <PromptGenerator />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/exercises" element={
+                <ProtectedRoute>
+                  <ViewAllExercises />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/assign" element={
+                <ProtectedRoute>
+                  <CreateAssignment />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/daily-settings" element={
+                <ProtectedRoute>
+                  <DailySettings />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/progress" element={
+                <ProtectedRoute>
+                  <Progress />
+                </ProtectedRoute>
+              } />
                       
                       {/* Admin Routes - Protected */}
               <Route path="/admin" element={

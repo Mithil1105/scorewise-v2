@@ -15,7 +15,7 @@ import {
   BookOpen, Building2, Users, FileText, 
   ClipboardList, Loader2, GraduationCap, FolderOpen,
   TrendingUp, CheckCircle2, Clock, AlertCircle, Sparkles, ArrowRight,
-  Award, ChevronDown, ChevronUp, Eye
+  Award, ChevronDown, ChevronUp, Eye, Plus
 } from 'lucide-react';
 import {
   Popover,
@@ -444,7 +444,7 @@ export default function TeacherDashboard() {
             <CardDescription>Get started with common tasks</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               <Button 
                 variant="outline" 
                 className="justify-start h-auto py-3"
@@ -499,6 +499,18 @@ export default function TeacherDashboard() {
                 <div className="text-left">
                   <div className="font-medium">Manage Institution</div>
                   <div className="text-xs text-muted-foreground">Admin settings</div>
+                </div>
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+              <Button 
+                variant="outline" 
+                className="justify-start h-auto py-3"
+                onClick={() => navigate('/teacher/grammar/quick-add')}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                <div className="text-left">
+                  <div className="font-medium">Grammar Exercises</div>
+                  <div className="text-xs text-muted-foreground">Create grammar prompts</div>
                 </div>
                 <ArrowRight className="h-4 w-4 ml-auto" />
               </Button>

@@ -324,10 +324,12 @@ const AIScorePanel = ({ essay, examType, taskType, topic, imageUrl, disabled, es
       const errorMsg = e instanceof Error ? e.message : "Failed to get score";
       setError(errorMsg);
       toast({
-        title: "Scoring failed",
-        description: errorMsg,
+        title: "AI scoring failed",
+        description: "AI scoring failed, but your essay is safely saved. You can try again later or continue without AI scoring.",
         variant: "destructive",
       });
+      // Essay is safe - don't break anything
+      // AI fields remain null, essay text is untouched
     } finally {
       setIsLoading(false);
     }
