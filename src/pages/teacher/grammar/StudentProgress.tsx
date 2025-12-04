@@ -71,17 +71,47 @@ export default function StudentProgress() {
       // Get all students in the institution
       const { data: members, error: membersError } = await supabase
         .from('institution_members')
-        .select('user_id, profiles:user_id(email, full_name)')
+        .select('user_id')
         .eq('institution_id', activeInstitution.id)
         .eq('status', 'active')
         .in('role', ['student']);
 
       if (membersError) throw membersError;
 
-      if (!members) return;
+      if (!members || members.length === 0) {
+        setStudents([]);
+        setLoading(false);
+        return;
+      }
 
-      // Get attempts for all students
+      // Get user profiles separately
       const studentIds = members.map(m => m.user_id);
+      
+      // Get profiles (display_name)
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('user_id, display_name')
+        .in('user_id', studentIds);
+
+      if (profilesError) {
+        console.warn("Error loading profiles:", profilesError);
+      }
+
+      const profilesMap = new Map((profiles || []).map(p => [p.user_id, p]));
+
+      // Get emails using RPC function
+      let emailsMap = new Map<string, string>();
+      try {
+        const { data: emailsData, error: emailsError } = await supabase
+          .rpc('get_user_emails', { user_ids: studentIds });
+        
+        if (!emailsError && emailsData) {
+          emailsMap = new Map(emailsData.map(e => [e.user_id, e.email]));
+        }
+      } catch (e) {
+        console.warn("Could not fetch emails:", e);
+      }
+
       const { data: attempts, error: attemptsError } = await supabase
         .from('grammar_attempts')
         .select('student_id, is_correct, submitted_at')
@@ -102,10 +132,13 @@ export default function StudentProgress() {
           ? memberAttempts.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime())[0].submitted_at
           : null;
 
+        const profile = profilesMap.get(member.user_id);
+        const email = emailsMap.get(member.user_id) || '';
+
         progressMap.set(member.user_id, {
           student_id: member.user_id,
-          student_name: (member.profiles as any)?.full_name || 'Unknown',
-          student_email: (member.profiles as any)?.email || '',
+          student_name: profile?.display_name || 'Unknown',
+          student_email: email,
           total_attempts: total,
           correct_attempts: correct,
           incorrect_attempts: incorrect,
@@ -129,9 +162,29 @@ export default function StudentProgress() {
 
   const loadStudentAttempts = async (studentId: string) => {
     try {
+      // Get student profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('user_id, display_name')
+        .eq('user_id', studentId)
+        .single();
+
+      // Get email using RPC function
+      let email = '';
+      try {
+        const { data: emailData, error: emailError } = await supabase
+          .rpc('get_user_emails', { user_ids: [studentId] });
+        
+        if (!emailError && emailData && emailData.length > 0) {
+          email = emailData[0].email || '';
+        }
+      } catch (e) {
+        console.warn("Could not fetch email:", e);
+      }
+
       const { data: attempts, error } = await supabase
         .from('grammar_attempts')
-        .select('*, profiles:student_id(email, full_name)')
+        .select('*')
         .eq('student_id', studentId)
         .order('submitted_at', { ascending: false })
         .limit(100);
@@ -143,20 +196,34 @@ export default function StudentProgress() {
           attempts.map(async (attempt: any) => {
             let exercise = null;
             
-            if (attempt.exercise_source_type === 'predefined') {
+            // Try to get question from grammar_questions first (new structure)
+            if (attempt.question_id) {
               const { data } = await supabase
-                .from('predefined_exercises')
+                .from('grammar_questions')
                 .select('question, answer')
-                .eq('id', attempt.exercise_id)
+                .eq('id', attempt.question_id)
                 .single();
               exercise = data;
-            } else {
-              const { data } = await supabase
-                .from('grammar_exercises')
-                .select('question, answer')
-                .eq('id', attempt.exercise_id)
-                .single();
-              exercise = data;
+            }
+            
+            // Fallback to old structure
+            if (!exercise) {
+              if (attempt.exercise_source_type === 'predefined') {
+                const { data } = await supabase
+                  .from('predefined_exercises')
+                  .select('question, answer')
+                  .eq('id', attempt.exercise_id)
+                  .single();
+                exercise = data;
+              } else {
+                // Try grammar_exercises (old structure)
+                const { data } = await supabase
+                  .from('grammar_exercises')
+                  .select('question, answer')
+                  .eq('id', attempt.exercise_id)
+                  .single();
+                exercise = data;
+              }
             }
 
             let assignmentTitle = null;
@@ -172,8 +239,8 @@ export default function StudentProgress() {
             return {
               id: attempt.id,
               student_id: attempt.student_id,
-              student_name: attempt.profiles?.full_name || 'Unknown',
-              student_email: attempt.profiles?.email || '',
+              student_name: profile?.display_name || 'Unknown',
+              student_email: email,
               question: exercise?.question || 'N/A',
               user_answer: attempt.user_answer,
               correct_answer: exercise?.answer || 'N/A',

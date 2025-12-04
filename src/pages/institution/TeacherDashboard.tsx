@@ -15,7 +15,7 @@ import {
   BookOpen, Building2, Users, FileText, 
   ClipboardList, Loader2, GraduationCap, FolderOpen,
   TrendingUp, CheckCircle2, Clock, AlertCircle, Sparkles, ArrowRight,
-  Award, ChevronDown, ChevronUp, Eye, Plus
+  Award, ChevronDown, ChevronUp, Eye, Plus, Settings
 } from 'lucide-react';
 import {
   Popover,
@@ -505,12 +505,12 @@ export default function TeacherDashboard() {
               <Button 
                 variant="outline" 
                 className="justify-start h-auto py-3"
-                onClick={() => navigate('/teacher/grammar/quick-add')}
+                onClick={() => navigate('/teacher/grammar')}
               >
-                <Plus className="h-4 w-4 mr-2" />
+                <BookOpen className="h-4 w-4 mr-2" />
                 <div className="text-left">
-                  <div className="font-medium">Grammar Exercises</div>
-                  <div className="text-xs text-muted-foreground">Create grammar prompts</div>
+                  <div className="font-medium">Grammar Module</div>
+                  <div className="text-xs text-muted-foreground">Manage grammar exercises and topics</div>
                 </div>
                 <ArrowRight className="h-4 w-4 ml-auto" />
               </Button>
@@ -520,7 +520,7 @@ export default function TeacherDashboard() {
 
         {/* Tabs for different sections */}
         <Tabs defaultValue="assignments" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 max-w-md">
+          <TabsList className="grid w-full grid-cols-4 max-w-2xl">
             <TabsTrigger value="assignments" className="flex items-center gap-2">
               <ClipboardList className="h-4 w-4" /> Assignments
             </TabsTrigger>
@@ -529,6 +529,9 @@ export default function TeacherDashboard() {
             </TabsTrigger>
             <TabsTrigger value="batches" className="flex items-center gap-2">
               <FolderOpen className="h-4 w-4" /> Batches
+            </TabsTrigger>
+            <TabsTrigger value="grammar" className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4" /> Grammar
             </TabsTrigger>
           </TabsList>
 
@@ -717,6 +720,152 @@ export default function TeacherDashboard() {
 
           <TabsContent value="batches">
             <BatchManager />
+          </TabsContent>
+
+          <TabsContent value="grammar">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BookOpen className="h-5 w-5" />
+                  Grammar Management
+                </CardTitle>
+                <CardDescription>
+                  Manage grammar topics, exercises, and student assignments
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/topics")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-blue-500 text-white">
+                          <BookOpen className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">Grammar Bank</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        View and manage grammar topics and exercises
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/topics/new")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-green-500 text-white">
+                          <Plus className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">Create Topic</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        Add a new grammar topic to your institute
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/quick-add")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-purple-500 text-white">
+                          <FileText className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">Quick Add Exercises</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        Quickly add single or multiple exercises
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/exercises/new")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-indigo-500 text-white">
+                          <FileText className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">Create Exercises (Bulk)</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        Add custom exercises in bulk with advanced options
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/assign")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-orange-500 text-white">
+                          <ClipboardList className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">Assign Grammar</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        Create manual assignments for students
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/student-progress")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-blue-500 text-white">
+                          <Users className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">Student Progress</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        View student grammar exercise progress and history
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/prompt-generator")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-violet-500 text-white">
+                          <Sparkles className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">ChatGPT Prompt Generator</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        Generate prompts to create exercises with AI
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                  <Card 
+                    className="hover:shadow-lg transition-shadow cursor-pointer"
+                    onClick={() => navigate("/teacher/grammar/exercises")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-teal-500 text-white">
+                          <Eye className="h-6 w-6" />
+                        </div>
+                        <CardTitle className="text-lg">View All Exercises</CardTitle>
+                      </div>
+                      <CardDescription className="mt-2">
+                        Browse and manage all grammar exercises
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 
