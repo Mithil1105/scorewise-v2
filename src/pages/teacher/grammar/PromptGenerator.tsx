@@ -108,11 +108,21 @@ REQUIREMENTS:
 - For sentence rewriting: Provide complete original sentences and complete rewritten versions. Include hints about what transformation is needed (e.g., "Convert to passive", "Change to indirect speech", "Use past perfect")
 - ALWAYS include helpful hints in parentheses or as part of the question when testing specific grammar concepts:
   * For tenses: "(Past perfect expected)", "(Future continuous required)", "(Present perfect needed)"
+    ** CRITICAL FOR TENSES: Always include the verb form needed in the hint. Examples:
+      - "(Past perfect: had + past participle)", "(Present continuous: am/is/are + verb-ing)", "(Future simple: will + base verb)"
+      - "(Past simple: verb + -ed or irregular form)", "(Present perfect: have/has + past participle)"
+      - Include the specific verb forms: "(Past perfect: had + past participle of 'finish' = had finished)"
+      - For irregular verbs, mention the forms: "(Past simple of 'go' = went)", "(Past participle of 'write' = written)"
   * For voice: "(Passive voice expected)", "(Convert to active voice)"
   * For modals: "(Modal verb needed)", "(Use 'should' or 'must')"
   * For conditionals: "(Third conditional required)", "(Use 'if' clause)"
   * For reported speech: "(Convert to indirect speech)", "(Change to reported speech)"
 - Include the key verb forms or grammar structures being tested in the question context
+- FOR TENSES EXERCISES: Always provide verb form guidance in hints. Include:
+  * The tense name and structure (e.g., "Past perfect: had + past participle")
+  * The specific verb forms when relevant (e.g., "Past simple of 'go' = went")
+  * Base form, past form, and past participle for irregular verbs when testing those forms
+  * Examples: "(Past perfect: had + past participle of 'complete' = had completed)", "(Present continuous: am/is/are + verb-ing)"
 - For passive voice exercises: ALWAYS include the active voice sentence first, then "Convert to passive:" followed by the sentence with blank
 - Mix different aspects of the topic (if applicable)
 - Ensure all sentences are complete and make sense as standalone statements

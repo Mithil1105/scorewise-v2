@@ -11,7 +11,8 @@ import {
   BarChart3,
   Plus,
   Sparkles,
-  Eye
+  Eye,
+  Users
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstitution } from "@/contexts/InstitutionContext";
@@ -72,10 +73,10 @@ export default function TeacherGrammarDashboard() {
     },
     {
       title: "Student Progress",
-      description: "View student performance and analytics",
-      icon: BarChart3,
-      onClick: () => navigate("/teacher/grammar/progress"),
-      color: "bg-cyan-500"
+      description: "View student grammar exercise progress and history",
+      icon: Users,
+      onClick: () => navigate("/teacher/grammar/student-progress"),
+      color: "bg-blue-500"
     },
     {
       title: "ChatGPT Prompt Generator",
@@ -90,6 +91,13 @@ export default function TeacherGrammarDashboard() {
       icon: Eye,
       onClick: () => navigate("/teacher/grammar/exercises"),
       color: "bg-slate-500"
+    },
+    {
+      title: "Student Progress",
+      description: "View student grammar exercise progress and history",
+      icon: Users,
+      onClick: () => navigate("/teacher/grammar/student-progress"),
+      color: "bg-blue-500"
     }
   ];
 

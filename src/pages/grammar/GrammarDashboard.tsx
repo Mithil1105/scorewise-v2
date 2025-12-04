@@ -14,7 +14,8 @@ import {
   Play, 
   CheckCircle2, 
   Clock,
-  Loader2
+  Loader2,
+  History
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstitution } from "@/contexts/InstitutionContext";
@@ -84,14 +85,25 @@ export default function GrammarDashboard() {
       } else {
         console.log("Loaded institute topics:", institute?.length || 0, institute);
         if (institute) {
-          // Load exercise counts for each topic
+          // Load question counts for each topic (count questions in exercise sets)
           const topicsWithCounts = await Promise.all(
             institute.map(async (topic) => {
-              const { count } = await supabase
-                .from('grammar_exercises')
-                .select('*', { count: 'exact', head: true })
+              // Get exercise sets for this topic
+              const { data: exerciseSets } = await supabase
+                .from('grammar_exercise_sets')
+                .select('id')
                 .eq('institute_id', institutionId)
                 .eq('topic_id', topic.id);
+              
+              if (!exerciseSets || exerciseSets.length === 0) {
+                return { ...topic, exercise_count: 0 };
+              }
+              
+              // Count questions in these exercise sets
+              const { count } = await supabase
+                .from('grammar_questions')
+                .select('*', { count: 'exact', head: true })
+                .in('exercise_set_id', exerciseSets.map(es => es.id));
               
               return {
                 ...topic,
@@ -100,12 +112,21 @@ export default function GrammarDashboard() {
             })
           );
 
-          // Also count exercises with no topic (general exercises)
-          const { count: generalCount } = await supabase
-            .from('grammar_exercises')
-            .select('*', { count: 'exact', head: true })
+          // Also count questions in exercise sets with no topic (general exercises)
+          const { data: generalExerciseSets } = await supabase
+            .from('grammar_exercise_sets')
+            .select('id')
             .eq('institute_id', institutionId)
             .is('topic_id', null);
+          
+          let generalCount = 0;
+          if (generalExerciseSets && generalExerciseSets.length > 0) {
+            const { count } = await supabase
+              .from('grammar_questions')
+              .select('*', { count: 'exact', head: true })
+              .in('exercise_set_id', generalExerciseSets.map(es => es.id));
+            generalCount = count || 0;
+          }
 
           setInstituteTopics(topicsWithCounts);
           
@@ -156,14 +177,25 @@ export default function GrammarDashboard() {
       } else {
         console.log("Loaded institute topics:", institute?.length || 0, institute);
         if (institute && institute.length > 0) {
-          // Load exercise counts for each topic
+          // Load question counts for each topic (count questions in exercise sets)
           const topicsWithCounts = await Promise.all(
             institute.map(async (topic) => {
-              const { count } = await supabase
-                .from('grammar_exercises')
-                .select('*', { count: 'exact', head: true })
+              // Get exercise sets for this topic
+              const { data: exerciseSets } = await supabase
+                .from('grammar_exercise_sets')
+                .select('id')
                 .eq('institute_id', activeInstitution.id)
                 .eq('topic_id', topic.id);
+              
+              if (!exerciseSets || exerciseSets.length === 0) {
+                return { ...topic, exercise_count: 0 };
+              }
+              
+              // Count questions in these exercise sets
+              const { count } = await supabase
+                .from('grammar_questions')
+                .select('*', { count: 'exact', head: true })
+                .in('exercise_set_id', exerciseSets.map(es => es.id));
               
               return {
                 ...topic,
@@ -172,12 +204,21 @@ export default function GrammarDashboard() {
             })
           );
 
-          // Also count exercises with no topic (general exercises)
-          const { count: generalCount } = await supabase
-            .from('grammar_exercises')
-            .select('*', { count: 'exact', head: true })
+          // Also count questions in exercise sets with no topic (general exercises)
+          const { data: generalExerciseSets } = await supabase
+            .from('grammar_exercise_sets')
+            .select('id')
             .eq('institute_id', activeInstitution.id)
             .is('topic_id', null);
+          
+          let generalCount = 0;
+          if (generalExerciseSets && generalExerciseSets.length > 0) {
+            const { count } = await supabase
+              .from('grammar_questions')
+              .select('*', { count: 'exact', head: true })
+              .in('exercise_set_id', generalExerciseSets.map(es => es.id));
+            generalCount = count || 0;
+          }
 
           setInstituteTopics(topicsWithCounts);
           
@@ -197,12 +238,21 @@ export default function GrammarDashboard() {
             ]);
           }
         } else {
-          // Check if there are any exercises without topics
-          const { count: generalCount } = await supabase
-            .from('grammar_exercises')
-            .select('*', { count: 'exact', head: true })
+          // Check if there are any questions in exercise sets without topics
+          const { data: generalExerciseSets } = await supabase
+            .from('grammar_exercise_sets')
+            .select('id')
             .eq('institute_id', activeInstitution.id)
             .is('topic_id', null);
+          
+          let generalCount = 0;
+          if (generalExerciseSets && generalExerciseSets.length > 0) {
+            const { count } = await supabase
+              .from('grammar_questions')
+              .select('*', { count: 'exact', head: true })
+              .in('exercise_set_id', generalExerciseSets.map(es => es.id));
+            generalCount = count || 0;
+          }
 
           if (generalCount && generalCount > 0) {
             setInstituteTopics([{
@@ -352,9 +402,18 @@ export default function GrammarDashboard() {
     <PageLayout>
       <TopBar />
       <div className="px-4 py-6 max-w-5xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-serif font-bold mb-2">Grammar Practice</h1>
-          <p className="text-muted-foreground">Improve your grammar skills with daily practice and assignments</p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-serif font-bold mb-2">Grammar Practice</h1>
+            <p className="text-muted-foreground">Improve your grammar skills with daily practice and assignments</p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => navigate("/grammar/history")}
+          >
+            <History className="h-4 w-4 mr-2" />
+            View History
+          </Button>
         </div>
 
         {/* Today's Practice */}

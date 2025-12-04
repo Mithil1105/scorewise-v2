@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, XCircle, ArrowRight, Loader2 } from "lucide-react";
 import { checkAnswer } from "@/utils/grammar/answerChecker";
 import { GrammarExerciseSourceType } from "@/types/grammar";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Exercise {
   id: string;
@@ -30,6 +32,7 @@ export function ExerciseRunner({
   onComplete,
   onExit
 }: ExerciseRunnerProps) {
+  const { user } = useAuth();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, boolean>>({});
@@ -73,6 +76,11 @@ export function ExerciseRunner({
   };
 
   const handleSubmit = async () => {
+    if (!user) {
+      console.error("User not authenticated");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       // Save all attempts to database
@@ -82,8 +90,26 @@ export function ExerciseRunner({
         userAnswer: userAnswers[ex.id] || ""
       }));
 
-      // TODO: Call API to save attempts to grammar_attempts table
-      // await saveGrammarAttempts(attemptResults, assignmentType, assignmentId, exerciseSourceType);
+      // Save attempts to grammar_attempts table
+      const attempts = attemptResults.map(result => ({
+        student_id: user.id,
+        assignment_type: assignmentType,
+        assignment_id: assignmentId || null,
+        exercise_id: result.exerciseId,
+        exercise_source_type: exerciseSourceType,
+        user_answer: result.userAnswer,
+        is_correct: result.isCorrect,
+        score: result.isCorrect ? 1.0 : 0.0
+      }));
+
+      const { error } = await supabase
+        .from('grammar_attempts')
+        .insert(attempts);
+
+      if (error) {
+        console.error("Error saving attempts:", error);
+        // Still call onComplete even if save fails
+      }
 
       if (onComplete) {
         onComplete(attemptResults);

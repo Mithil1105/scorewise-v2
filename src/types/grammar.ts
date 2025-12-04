@@ -36,7 +36,7 @@ export interface GrammarTopic {
   created_at: string;
 }
 
-// Institute Grammar Exercises
+// Institute Grammar Exercises (DEPRECATED - use GrammarExerciseSet instead)
 export interface GrammarExercise {
   id: string;
   institute_id: string;
@@ -47,6 +47,31 @@ export interface GrammarExercise {
   difficulty: number;
   use_ai_check: boolean;
   created_by: string | null;
+  created_at: string;
+}
+
+// Grammar Exercise Sets (new structure - contains multiple questions)
+export interface GrammarExerciseSet {
+  id: string;
+  institute_id: string;
+  topic_id: string | null;
+  title: string;
+  description: string | null;
+  difficulty: number;
+  estimated_time: number | null;
+  instructions: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Grammar Questions (individual questions within an exercise set)
+export interface GrammarQuestion {
+  id: string;
+  exercise_set_id: string;
+  question: string;
+  answer: string; // can contain multiple answers separated by |
+  question_order: number;
   created_at: string;
 }
 
@@ -90,23 +115,40 @@ export interface GrammarManualAssignment {
   topic_id: string | null;
   batch_ids: string[] | null;
   student_ids: string[] | null;
-  exercise_ids: string[];
+  exercise_ids: string[]; // DEPRECATED - use exercise_set_ids
+  exercise_set_ids: string[] | null; // NEW - references grammar_exercise_sets
   due_date: string | null;
   created_at: string;
 }
 
-// Grammar Attempts
+// Grammar Attempts (question-level)
 export interface GrammarAttempt {
   id: string;
   student_id: string;
   assignment_type: GrammarAssignmentType;
   assignment_id: string | null;
-  exercise_id: string;
+  exercise_id: string; // DEPRECATED - use exercise_set_id and question_id
+  exercise_set_id: string | null; // NEW
+  question_id: string | null; // NEW
   exercise_source_type: GrammarExerciseSourceType;
   user_answer: string;
   is_correct: boolean;
   score: number;
   submitted_at: string;
+}
+
+// Grammar Exercise Completions (exercise-level)
+export interface GrammarExerciseCompletion {
+  id: string;
+  student_id: string;
+  exercise_set_id: string;
+  assignment_type: GrammarAssignmentType;
+  assignment_id: string | null;
+  total_questions: number;
+  correct_answers: number;
+  incorrect_answers: number;
+  score: number;
+  completed_at: string;
 }
 
 // Combined types for UI
@@ -126,5 +168,15 @@ export interface GrammarAssignmentWithDetails extends GrammarManualAssignment {
   topic?: GrammarTopic | PredefinedTopic;
   exercise_count?: number;
   completed_count?: number;
+}
+
+// Combined types for UI
+export interface GrammarExerciseSetWithQuestions extends GrammarExerciseSet {
+  questions?: GrammarQuestion[];
+  question_count?: number;
+}
+
+export interface GrammarQuestionWithSet extends GrammarQuestion {
+  exercise_set?: GrammarExerciseSet;
 }
 

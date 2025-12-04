@@ -17,6 +17,7 @@ import IELTSHome from "./pages/IELTSHome";
 import IELTSTask1 from "./pages/IELTSTask1";
 import IELTSTask2 from "./pages/IELTSTask2";
 import GrammarDashboard from "./pages/grammar/GrammarDashboard";
+import GrammarHistory from "./pages/grammar/GrammarHistory";
 import TopicDetail from "./pages/grammar/TopicDetail";
 import AssignmentDetail from "./pages/grammar/AssignmentDetail";
 import Auth from "./pages/Auth";
@@ -51,6 +52,7 @@ import CreateExercises from "./pages/teacher/grammar/CreateExercises";
 import QuickAddExercises from "./pages/teacher/grammar/QuickAddExercises";
 import PromptGenerator from "./pages/teacher/grammar/PromptGenerator";
 import ViewAllExercises from "./pages/teacher/grammar/ViewAllExercises";
+import StudentProgress from "./pages/teacher/grammar/StudentProgress";
 import CreateAssignment from "./pages/teacher/grammar/CreateAssignment";
 import DailySettings from "./pages/teacher/grammar/DailySettings";
 import Progress from "./pages/teacher/grammar/Progress";
@@ -85,6 +87,7 @@ const App = () => (
               <Route path="/ielts/task1" element={<IELTSTask1 />} />
               <Route path="/ielts/task2" element={<IELTSTask2 />} />
               <Route path="/grammar" element={<GrammarDashboard />} />
+              <Route path="/grammar/history" element={<GrammarHistory />} />
               <Route path="/grammar/topic/:type/:topicId" element={<TopicDetail />} />
               <Route path="/grammar/assignment/:assignmentId" element={<AssignmentDetail />} />
               <Route path="/auth" element={<Auth />} />
@@ -189,6 +192,11 @@ const App = () => (
               <Route path="/teacher/grammar/exercises" element={
                 <ProtectedRoute>
                   <ViewAllExercises />
+                </ProtectedRoute>
+              } />
+              <Route path="/teacher/grammar/student-progress" element={
+                <ProtectedRoute>
+                  <StudentProgress />
                 </ProtectedRoute>
               } />
               <Route path="/teacher/grammar/assign" element={

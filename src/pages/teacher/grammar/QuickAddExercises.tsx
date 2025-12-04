@@ -25,6 +25,7 @@ export default function QuickAddExercises() {
   const [mode, setMode] = useState<'single' | 'bulk'>('single');
   
   // Single exercise form
+  const [singleExerciseName, setSingleExerciseName] = useState("");
   const [singleQuestion, setSingleQuestion] = useState("");
   const [singleAnswer, setSingleAnswer] = useState("");
   const [singleTopicId, setSingleTopicId] = useState<string>("");
@@ -32,6 +33,7 @@ export default function QuickAddExercises() {
   const [singleExerciseType, setSingleExerciseType] = useState<'fill-blank' | 'rewrite'>('fill-blank');
   
   // Bulk exercise form
+  const [bulkExerciseName, setBulkExerciseName] = useState("");
   const [bulkInput, setBulkInput] = useState("");
   const [bulkTopicId, setBulkTopicId] = useState<string>("");
   const [bulkDifficulty, setBulkDifficulty] = useState(1);
@@ -121,6 +123,15 @@ export default function QuickAddExercises() {
       return;
     }
 
+    if (!singleExerciseName.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter an exercise name",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!singleQuestion.trim() || !singleAnswer.trim()) {
       toast({
         title: "Validation Error",
@@ -138,31 +149,44 @@ export default function QuickAddExercises() {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('grammar_exercises')
+      // First, create the exercise set
+      const { data: exerciseSet, error: setError } = await supabase
+        .from('grammar_exercise_sets')
         .insert({
           institute_id: activeInstitution.id,
           topic_id: singleTopicId || null,
-          question: formattedQuestion,
-          answer: singleAnswer.trim(),
-          source: 'custom' as const,
+          title: singleExerciseName.trim(),
+          description: null,
           difficulty: singleDifficulty,
           created_by: user.id
         })
         .select()
         .single();
 
-      if (error) throw error;
+      if (setError) throw setError;
+
+      // Then, add the question to the exercise set
+      const { error: questionError } = await supabase
+        .from('grammar_questions')
+        .insert({
+          exercise_set_id: exerciseSet.id,
+          question: formattedQuestion,
+          answer: singleAnswer.trim(),
+          question_order: 0
+        });
+
+      if (questionError) throw questionError;
 
       toast({
         title: "Success",
-        description: "Exercise created successfully",
+        description: "Exercise set created successfully",
       });
 
       // Reload topics to refresh exercise counts
       await loadInstituteTopics();
 
       // Reset form
+      setSingleExerciseName("");
       setSingleQuestion("");
       setSingleAnswer("");
       setSingleTopicId("");
@@ -192,6 +216,15 @@ export default function QuickAddExercises() {
       return;
     }
 
+    if (!bulkExerciseName.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter an exercise name",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!bulkInput.trim()) {
       toast({
         title: "Validation Error",
@@ -213,32 +246,47 @@ export default function QuickAddExercises() {
 
     setLoading(true);
     try {
-      const exerciseData = exercises.map(ex => ({
-        institute_id: activeInstitution.id,
-        topic_id: bulkTopicId || null,
+      // First, create the exercise set
+      const { data: exerciseSet, error: setError } = await supabase
+        .from('grammar_exercise_sets')
+        .insert({
+          institute_id: activeInstitution.id,
+          topic_id: bulkTopicId || null,
+          title: bulkExerciseName.trim(),
+          description: null,
+          difficulty: bulkDifficulty,
+          created_by: user.id
+        })
+        .select()
+        .single();
+
+      if (setError) throw setError;
+
+      // Then, add all questions to the exercise set
+      const questionData = exercises.map((ex, index) => ({
+        exercise_set_id: exerciseSet.id,
         question: ex.question,
         answer: ex.answer,
-        source: 'custom' as const,
-        difficulty: bulkDifficulty,
-        created_by: user.id
+        question_order: index
       }));
 
-      const { data: insertedExercises, error } = await supabase
-        .from('grammar_exercises')
-        .insert(exerciseData)
+      const { data: insertedQuestions, error: questionError } = await supabase
+        .from('grammar_questions')
+        .insert(questionData)
         .select();
 
-      if (error) throw error;
+      if (questionError) throw questionError;
 
       toast({
         title: "Success",
-        description: `Created ${insertedExercises.length} exercises successfully`,
+        description: `Created exercise set "${bulkExerciseName}" with ${insertedQuestions.length} questions successfully`,
       });
 
       // Reload topics to refresh exercise counts
       await loadInstituteTopics();
 
       // Reset form
+      setBulkExerciseName("");
       setBulkInput("");
       setBulkTopicId("");
       setBulkDifficulty(1);
@@ -293,6 +341,20 @@ export default function QuickAddExercises() {
               {/* Single Exercise Tab */}
               <TabsContent value="single" className="space-y-4 mt-6">
                 <form onSubmit={handleSingleSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="singleExerciseName">Exercise Name *</Label>
+                    <Input
+                      id="singleExerciseName"
+                      value={singleExerciseName}
+                      onChange={(e) => setSingleExerciseName(e.target.value)}
+                      placeholder="e.g., Present Simple Practice"
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Give a name to this exercise set
+                    </p>
+                  </div>
+
                   <div className="space-y-2">
                     <Label htmlFor="singleExerciseType">Exercise Type *</Label>
                     <Select value={singleExerciseType} onValueChange={(v) => setSingleExerciseType(v as 'fill-blank' | 'rewrite')}>
@@ -442,7 +504,21 @@ export default function QuickAddExercises() {
               <TabsContent value="bulk" className="space-y-4 mt-6">
                 <form onSubmit={handleBulkSubmit} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="bulkInput">Exercises (Format: Question {'->'} Answer) *</Label>
+                    <Label htmlFor="bulkExerciseName">Exercise Name *</Label>
+                    <Input
+                      id="bulkExerciseName"
+                      value={bulkExerciseName}
+                      onChange={(e) => setBulkExerciseName(e.target.value)}
+                      placeholder="e.g., Passive Voice Practice Set 1"
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Give a name to this exercise set (all questions below will be added to this set)
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="bulkInput">Questions (Format: Question {'->'} Answer) *</Label>
                     <Textarea
                       id="bulkInput"
                       value={bulkInput}

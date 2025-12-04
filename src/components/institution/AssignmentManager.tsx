@@ -32,7 +32,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { 
   Plus, Loader2, ClipboardList, Calendar, Users, 
   FileText, MoreHorizontal, Eye, Trash2, Clock, 
-  BookOpen, GraduationCap, Sparkles, Info, Image as ImageIcon, X, Search, Check, CheckCircle2
+  BookOpen, GraduationCap, Sparkles, Info, Image as ImageIcon, X, Search, Check, CheckCircle2, CheckSquare
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -140,12 +140,14 @@ export function AssignmentManager() {
     batch_id: '',
     use_predefined_topic: false,
     selected_topic_id: '',
-    image_url: ''
+    image_url: '',
+    grammar_exercise_set_ids: [] as string[] // For grammar exercises
   });
   
 
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [availableTopics, setAvailableTopics] = useState<GRETopic[] | IELTSTask1Question[] | IELTSTask2Topic[]>([]);
+  const [availableGrammarExerciseSets, setAvailableGrammarExerciseSets] = useState<any[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -210,15 +212,23 @@ export function AssignmentManager() {
   useEffect(() => {
     if (newAssignment.exam_type === 'GRE') {
       setAvailableTopics(getAllTopics());
+      setAvailableGrammarExerciseSets([]);
     } else if (newAssignment.exam_type === 'IELTS_T1') {
       setAvailableTopics(ieltsTask1Questions);
+      setAvailableGrammarExerciseSets([]);
     } else if (newAssignment.exam_type === 'IELTS_T1_General') {
       // General Task 1 uses custom topics, so no predefined topics needed
       setAvailableTopics([]);
+      setAvailableGrammarExerciseSets([]);
     } else if (newAssignment.exam_type === 'IELTS_T2') {
       setAvailableTopics(ieltsTask2Topics);
+      setAvailableGrammarExerciseSets([]);
+    } else if (newAssignment.exam_type === 'GRAMMAR') {
+      setAvailableTopics([]);
+      loadGrammarExerciseSets();
     } else {
       setAvailableTopics([]);
+      setAvailableGrammarExerciseSets([]);
     }
     
     // Reset topic selection when exam type changes
@@ -227,9 +237,31 @@ export function AssignmentManager() {
       selected_topic_id: '',
       topic: '',
       instructions: '',
-      task_type: ''
+      task_type: '',
+      grammar_exercise_set_ids: []
     }));
-  }, [newAssignment.exam_type]);
+  }, [newAssignment.exam_type, activeInstitution]);
+
+  // Load grammar exercise sets
+  const loadGrammarExerciseSets = async () => {
+    if (!activeInstitution) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('grammar_exercise_sets')
+        .select('id, title, description, difficulty, topic_id, grammar_topics:topic_id(topic_name)')
+        .eq('institute_id', activeInstitution.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      if (data) {
+        setAvailableGrammarExerciseSets(data);
+      }
+    } catch (error) {
+      console.error('Error loading grammar exercise sets:', error);
+    }
+  };
 
   // Handle predefined topic selection
   useEffect(() => {
@@ -419,10 +451,11 @@ export function AssignmentManager() {
         return;
       }
       
-      if (!newAssignment.topic.trim()) {
+      // Skip topic validation for grammar exercises
+      if (newAssignment.exam_type !== 'GRAMMAR' && !newAssignment.topic.trim()) {
         toast({ title: 'Error', description: 'Please enter or select a topic', variant: 'destructive' });
         return;
-    }
+      }
     
     setSaving(true);
     try {
@@ -457,6 +490,67 @@ export function AssignmentManager() {
       const batchIdValue = newAssignment.batch_id && newAssignment.batch_id.trim() && newAssignment.batch_id !== 'all' 
         ? newAssignment.batch_id.trim() 
         : null;
+
+      // Handle grammar exercise assignments differently
+      if (newAssignment.exam_type === 'GRAMMAR') {
+        if (newAssignment.grammar_exercise_set_ids.length === 0) {
+          toast({
+            title: 'Validation Error',
+            description: 'Please select at least one grammar exercise set',
+            variant: 'destructive'
+          });
+          return;
+        }
+
+        // Create grammar manual assignment
+        const { data: grammarAssignment, error: grammarError } = await supabase
+          .from('grammar_manual_assignments')
+          .insert({
+            teacher_id: user.id,
+            institute_id: activeInstitution.id,
+            title: newAssignment.title.trim(),
+            source_type: 'custom',
+            topic_type: 'institute',
+            topic_id: null,
+            batch_ids: batchIdValue ? [batchIdValue] : null,
+            student_ids: selectedStudentIds.length > 0 ? selectedStudentIds.map(id => {
+              // Convert member_id to user_id
+              const student = students.find(s => s.id === id);
+              return student?.user_id;
+            }).filter(Boolean) as string[] : null,
+            exercise_set_ids: newAssignment.grammar_exercise_set_ids,
+            due_date: dueDateISO ? dueDateISO.split('T')[0] : null
+          })
+          .select()
+          .single();
+
+        if (grammarError) throw grammarError;
+
+        toast({ title: 'Grammar Assignment created!', description: 'Students can now see and complete this assignment.' });
+        
+        // Reset form
+        const resetForm = {
+          title: '',
+          topic: '',
+          exam_type: 'GRE',
+          task_type: '',
+          instructions: '',
+          due_date: '',
+          due_time: '',
+          batch_id: '',
+          use_predefined_topic: false,
+          selected_topic_id: '',
+          image_url: '',
+          grammar_exercise_set_ids: []
+        };
+        setNewAssignment(resetForm);
+        setSelectedDate(undefined);
+        setImageFile(null);
+        setSelectedStudentIds([]);
+        setCreateOpen(false);
+        fetchAssignments();
+        return;
+      }
 
       const { data: assignmentData, error } = await supabase
         .from('assignments')
@@ -532,7 +626,8 @@ export function AssignmentManager() {
         batch_id: '',
         use_predefined_topic: false,
         selected_topic_id: '',
-          image_url: ''
+        image_url: '',
+        grammar_exercise_set_ids: []
       };
       setNewAssignment(resetForm);
       setSelectedDate(undefined);
@@ -877,6 +972,11 @@ export function AssignmentManager() {
                               <BookOpen className="h-4 w-4" /> IELTS Task 2
                             </span>
                           </SelectItem>
+                          <SelectItem value="GRAMMAR">
+                            <span className="flex items-center gap-2">
+                              <CheckSquare className="h-4 w-4" /> Grammar Exercise
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -979,7 +1079,70 @@ export function AssignmentManager() {
                   
                   {/* Topic & Details Section */}
                     <div className="space-y-4 pt-4 border-t">
-                      {newAssignment.exam_type !== 'IELTS_T1_General' && (
+                      {/* Grammar Exercise Set Selection */}
+                      {newAssignment.exam_type === 'GRAMMAR' && (
+                        <div className="space-y-2">
+                          <Label>Select Grammar Exercise Sets *</Label>
+                          <div className="border rounded-lg p-4 max-h-[300px] overflow-y-auto">
+                            {availableGrammarExerciseSets.length === 0 ? (
+                              <p className="text-sm text-muted-foreground text-center py-4">
+                                No grammar exercise sets available. Create some first!
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                {availableGrammarExerciseSets.map((exerciseSet) => {
+                                  const topicName = (exerciseSet.grammar_topics as any)?.topic_name || 'General';
+                                  return (
+                                    <div
+                                      key={exerciseSet.id}
+                                      className="flex items-start gap-2 p-2 border rounded hover:bg-muted/50 cursor-pointer"
+                                      onClick={() => {
+                                        const isSelected = newAssignment.grammar_exercise_set_ids.includes(exerciseSet.id);
+                                        setNewAssignment(prev => ({
+                                          ...prev,
+                                          grammar_exercise_set_ids: isSelected
+                                            ? prev.grammar_exercise_set_ids.filter(id => id !== exerciseSet.id)
+                                            : [...prev.grammar_exercise_set_ids, exerciseSet.id]
+                                        }));
+                                      }}
+                                    >
+                                      <Checkbox
+                                        checked={newAssignment.grammar_exercise_set_ids.includes(exerciseSet.id)}
+                                        onCheckedChange={(checked) => {
+                                          setNewAssignment(prev => ({
+                                            ...prev,
+                                            grammar_exercise_set_ids: checked
+                                              ? [...prev.grammar_exercise_set_ids, exerciseSet.id]
+                                              : prev.grammar_exercise_set_ids.filter(id => id !== exerciseSet.id)
+                                          }));
+                                        }}
+                                      />
+                                      <div className="flex-1">
+                                        <div className="font-medium">{exerciseSet.title}</div>
+                                        <div className="text-sm text-muted-foreground">
+                                          Topic: {topicName} • Difficulty: {exerciseSet.difficulty === 1 ? 'Easy' : exerciseSet.difficulty === 2 ? 'Medium' : 'Hard'}
+                                        </div>
+                                        {exerciseSet.description && (
+                                          <div className="text-xs text-muted-foreground mt-1">
+                                            {exerciseSet.description}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                          {newAssignment.grammar_exercise_set_ids.length > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              {newAssignment.grammar_exercise_set_ids.length} exercise set{newAssignment.grammar_exercise_set_ids.length !== 1 ? 's' : ''} selected
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {newAssignment.exam_type !== 'IELTS_T1_General' && newAssignment.exam_type !== 'GRAMMAR' && (
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -1036,6 +1199,7 @@ export function AssignmentManager() {
                         </div>
                       )}
 
+                      {newAssignment.exam_type !== 'GRAMMAR' && (
                       <div className="space-y-2">
                         <Label htmlFor="topic">
                           Essay Topic/Prompt * 
@@ -1052,6 +1216,7 @@ export function AssignmentManager() {
                           className="font-serif"
                         />
                       </div>
+                      )}
 
                       {newAssignment.exam_type === 'IELTS_T1' && (
                         <div className="space-y-2">
@@ -1100,8 +1265,8 @@ export function AssignmentManager() {
                         )}
                       </div>
 
-                      {/* Image Upload Section - Hidden for General Task 1 */}
-                      {newAssignment.exam_type !== 'IELTS_T1_General' && (
+                      {/* Image Upload Section - Hidden for General Task 1 and Grammar */}
+                      {newAssignment.exam_type !== 'IELTS_T1_General' && newAssignment.exam_type !== 'GRAMMAR' && (
                       <div className="space-y-2">
                         <Label htmlFor="assignment_image">
                           Assignment Image (optional)
@@ -1226,8 +1391,14 @@ export function AssignmentManager() {
                             <p><strong>Type:</strong> {
                               newAssignment.exam_type === 'GRE' ? 'GRE/PT' :
                               newAssignment.exam_type === 'IELTS_T1' ? 'IELTS Task 1' :
-                              'IELTS Task 2'
+                              newAssignment.exam_type === 'IELTS_T1_General' ? 'IELTS Task 1 (General)' :
+                              newAssignment.exam_type === 'IELTS_T2' ? 'IELTS Task 2' :
+                              newAssignment.exam_type === 'GRAMMAR' ? 'Grammar Exercise' :
+                              'Unknown'
                             }</p>
+                            {newAssignment.exam_type === 'GRAMMAR' && newAssignment.grammar_exercise_set_ids.length > 0 && (
+                              <p><strong>Exercise Sets:</strong> {newAssignment.grammar_exercise_set_ids.length} selected</p>
+                            )}
                             <p><strong>Batch:</strong> {
                               newAssignment.batch_id 
                                 ? batches.find(b => b.id === newAssignment.batch_id)?.name || 'Selected'
@@ -1274,7 +1445,8 @@ export function AssignmentManager() {
                       batch_id: '',
                       use_predefined_topic: false,
                       selected_topic_id: '',
-                      image_url: ''
+                      image_url: '',
+                      grammar_exercise_set_ids: []
                     });
                     setSelectedDate(undefined);
                     setImageFile(null);
@@ -1383,7 +1555,17 @@ export function AssignmentManager() {
                                   <BookOpen className="h-3 w-3" /> IELTS T2
                                 </span>
                               )}
-                              {!['GRE', 'IELTS_T1', 'IELTS_T2'].includes(assignment.exam_type) && assignment.exam_type}
+                              {assignment.exam_type === 'IELTS_T1_General' && (
+                                <span className="flex items-center gap-1">
+                                  <FileText className="h-3 w-3" /> IELTS T1 (General)
+                                </span>
+                              )}
+                              {assignment.exam_type === 'GRAMMAR' && (
+                                <span className="flex items-center gap-1">
+                                  <CheckSquare className="h-3 w-3" /> Grammar
+                                </span>
+                              )}
+                              {!['GRE', 'IELTS_T1', 'IELTS_T1_General', 'IELTS_T2', 'GRAMMAR'].includes(assignment.exam_type) && assignment.exam_type}
                             </Badge>
                           </TableCell>
                           <TableCell>

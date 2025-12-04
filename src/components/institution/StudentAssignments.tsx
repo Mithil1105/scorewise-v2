@@ -65,6 +65,17 @@ export function StudentAssignments() {
         .eq('is_active', true)
         .order('due_date', { ascending: true, nullsFirst: false });
 
+      // Also fetch grammar manual assignments
+      const { data: grammarAssignments, error: grammarError } = await supabase
+        .from('grammar_manual_assignments')
+        .select('*')
+        .eq('institute_id', activeInstitution.id)
+        .order('due_date', { ascending: true, nullsFirst: false });
+
+      if (grammarError) {
+        console.error('Error fetching grammar assignments:', grammarError);
+      }
+
       if (assignmentsError) {
         console.error('Error fetching assignments:', assignmentsError);
         throw assignmentsError;
@@ -128,13 +139,52 @@ export function StudentAssignments() {
 
       const studentBatchIds = new Set(studentBatches?.map(sb => sb.batch_id) || []);
 
+      // Filter grammar assignments
+      const grammarAssignmentsData = (grammarAssignments || []).filter(assignment => {
+        // Check if student is in student_ids array
+        if (assignment.student_ids && assignment.student_ids.length > 0) {
+          return assignment.student_ids.includes(activeMembership.user_id);
+        }
+        
+        // Check if student is in any of the batch_ids
+        if (assignment.batch_ids && assignment.batch_ids.length > 0) {
+          return assignment.batch_ids.some(batchId => studentBatchIds.has(batchId));
+        }
+        
+        // If no specific students or batches, show to all students in institution
+        return true;
+      });
+
+      // Convert grammar assignments to Assignment format for display
+      const convertedGrammarAssignments: Assignment[] = grammarAssignmentsData.map(ga => ({
+        id: ga.id,
+        institution_id: ga.institute_id,
+        batch_id: null,
+        created_by: ga.teacher_id,
+        title: ga.title,
+        topic: 'Grammar Exercise Assignment',
+        exam_type: 'GRAMMAR',
+        instructions: null,
+        due_date: ga.due_date,
+        max_word_count: null,
+        min_word_count: null,
+        image_url: null,
+        is_active: true,
+        created_at: ga.created_at,
+        grammar_assignment_id: ga.id, // Store original ID for navigation
+        exercise_set_ids: ga.exercise_set_ids || []
+      }));
+
+      // Combine regular assignments with grammar assignments
+      const allAssignmentsCombined = [...(enrichedAssignments || []), ...convertedGrammarAssignments];
+
       // Filter assignments:
       // Priority order:
       // 1. If assignment has specific students assigned (via assignment_students table), only show if this student is in the list
       // 2. If assignment has batch_id, only show if student is in that batch
       // 3. If assignment has no batch_id AND no specific students, show to ALL students (assigned to everyone)
       // This ensures new students can see assignments that were created for "everyone" before they joined
-      const assignmentsData = (enrichedAssignments || []).filter(assignment => {
+      const assignmentsData = allAssignmentsCombined.filter(assignment => {
         // First check: If assignment has specific students assigned (entries in assignment_students table)
         // This takes priority - if specific students are assigned, only show to those students
         if (assignmentsWithSpecificStudents.has(assignment.id)) {
@@ -254,6 +304,12 @@ export function StudentAssignments() {
         });
     }
 
+    // Handle grammar assignments differently
+    if (assignment.exam_type === 'GRAMMAR' && assignment.grammar_assignment_id) {
+      navigate(`/grammar/assignment/${assignment.grammar_assignment_id}`);
+      return;
+    }
+
     // Navigate to essay page with full assignment context
     const route = (assignment.exam_type === 'IELTS_T1' || assignment.exam_type === 'IELTS_T1_General')
       ? '/ielts/task1'
@@ -368,7 +424,9 @@ export function StudentAssignments() {
                               <div className="flex items-center gap-2">
                                 <Badge variant="secondary" className="text-xs">
                                   {assignment.exam_type === 'IELTS_T1' ? 'Task 1' : 
+                                   assignment.exam_type === 'IELTS_T1_General' ? 'Task 1 (General)' :
                                    assignment.exam_type === 'IELTS_T2' ? 'Task 2' : 
+                                   assignment.exam_type === 'GRAMMAR' ? 'Grammar' :
                                    'GRE'}
                                 </Badge>
                                 <span className="text-sm font-medium">{assignment.title}</span>
@@ -436,7 +494,14 @@ export function StudentAssignments() {
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-semibold">{assignment.title}</h3>
                         {getStatusBadge(assignment)}
-                        <Badge variant="outline">{assignment.exam_type}</Badge>
+                        <Badge variant="outline">
+                          {assignment.exam_type === 'GRE' ? 'GRE/PT' :
+                           assignment.exam_type === 'IELTS_T1' ? 'IELTS Task 1' :
+                           assignment.exam_type === 'IELTS_T1_General' ? 'IELTS Task 1 (General)' :
+                           assignment.exam_type === 'IELTS_T2' ? 'IELTS Task 2' :
+                           assignment.exam_type === 'GRAMMAR' ? 'Grammar Exercise' :
+                           assignment.exam_type}
+                        </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
                         {assignment.topic}
