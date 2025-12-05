@@ -2,8 +2,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import { CheckCircle2, XCircle, ArrowRight, Loader2 } from "lucide-react";
 import { checkAnswer } from "@/utils/grammar/answerChecker";
+import { parseMCQ, checkMCQAnswer, ParsedMCQ } from "@/utils/grammar/mcqParser";
 import { GrammarExerciseSourceType } from "@/types/grammar";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +16,8 @@ interface Exercise {
   question: string;
   answer: string;
   use_ai_check?: boolean;
+  exercise_set_id?: string;
+  exercise_set_title?: string;
 }
 
 interface ExerciseRunnerProps {
@@ -44,18 +49,29 @@ export function ExerciseRunner({
   const currentAnswer = userAnswers[currentExercise.id] || "";
   const isLastExercise = currentIndex === exercises.length - 1;
   const allAnswered = exercises.every(ex => userAnswers[ex.id]?.trim());
+  
+  // Parse MCQ format if present
+  const parsedMCQ: ParsedMCQ = parseMCQ(currentExercise.question, currentExercise.answer);
 
   const handleCheck = async () => {
     if (!currentAnswer.trim()) return;
 
     setIsChecking(true);
     try {
-      const isCorrect = await checkAnswer(
-        currentExercise.question,
-        currentExercise.answer,
-        currentAnswer,
-        currentExercise.use_ai_check || false
-      );
+      let isCorrect: boolean;
+      
+      // Use MCQ checking if it's an MCQ
+      if (parsedMCQ.isMCQ) {
+        isCorrect = checkMCQAnswer(currentAnswer, parsedMCQ.correctAnswer, parsedMCQ.options);
+      } else {
+        // Use regular answer checking for fill-in-the-blank and rewrite
+        isCorrect = await checkAnswer(
+          currentExercise.question,
+          currentExercise.answer,
+          currentAnswer,
+          currentExercise.use_ai_check || false
+        );
+      }
 
       setResults(prev => ({ ...prev, [currentExercise.id]: isCorrect }));
       setShowResult(true);
@@ -90,25 +106,62 @@ export function ExerciseRunner({
         userAnswer: userAnswers[ex.id] || ""
       }));
 
-      // Save attempts to grammar_attempts table
-      const attempts = attemptResults.map(result => ({
-        student_id: user.id,
-        assignment_type: assignmentType,
-        assignment_id: assignmentId || null,
-        exercise_id: result.exerciseId,
-        exercise_source_type: exerciseSourceType,
-        user_answer: result.userAnswer,
-        is_correct: result.isCorrect,
-        score: result.isCorrect ? 1.0 : 0.0
-      }));
+      // Get exercise_set_id from first exercise (all exercises in a set should have same exercise_set_id)
+      const exerciseSetId = exercises.length > 0 && exercises[0].exercise_set_id 
+        ? exercises[0].exercise_set_id 
+        : null;
 
-      const { error } = await supabase
+      // Save attempts to grammar_attempts table
+      const attempts = attemptResults.map(result => {
+        const exercise = exercises.find(ex => ex.id === result.exerciseId);
+        return {
+          student_id: user.id,
+          assignment_type: assignmentType,
+          assignment_id: assignmentId || null,
+          exercise_id: result.exerciseId,
+          exercise_set_id: exerciseSetId || exercise?.exercise_set_id || null,
+          question_id: result.exerciseId,
+          exercise_source_type: exerciseSourceType,
+          user_answer: result.userAnswer,
+          is_correct: result.isCorrect,
+          score: result.isCorrect ? 1.0 : 0.0
+        };
+      });
+
+      const { error: attemptsError } = await supabase
         .from('grammar_attempts')
         .insert(attempts);
 
-      if (error) {
-        console.error("Error saving attempts:", error);
+      if (attemptsError) {
+        console.error("Error saving attempts:", attemptsError);
         // Still call onComplete even if save fails
+      }
+
+      // Create or update completion record if exercise_set_id is available
+      if (exerciseSetId) {
+        const totalQuestions = attemptResults.length;
+        const correctAnswers = attemptResults.filter(r => r.isCorrect).length;
+        const incorrectAnswers = totalQuestions - correctAnswers;
+        const score = correctAnswers;
+
+        const { error: completionError } = await supabase
+          .from('grammar_exercise_completions')
+          .upsert({
+            student_id: user.id,
+            exercise_set_id: exerciseSetId,
+            assignment_type: assignmentType,
+            assignment_id: assignmentId || null,
+            total_questions: totalQuestions,
+            correct_answers: correctAnswers,
+            incorrect_answers: incorrectAnswers,
+            score: score
+          }, {
+            onConflict: 'student_id,exercise_set_id,assignment_type,assignment_id'
+          });
+
+        if (completionError) {
+          console.error("Error saving completion:", completionError);
+        }
       }
 
       if (onComplete) {
@@ -138,21 +191,65 @@ export function ExerciseRunner({
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <p className="text-lg font-medium">{currentExercise.question}</p>
+          <p className="text-lg font-medium">{parsedMCQ.isMCQ ? parsedMCQ.questionText : currentExercise.question}</p>
         </div>
 
         <div className="space-y-2">
           <label className="text-sm font-medium">Your Answer</label>
-          <Textarea
-            value={currentAnswer}
-            onChange={(e) => {
-              setUserAnswers(prev => ({ ...prev, [currentExercise.id]: e.target.value }));
-              setShowResult(false);
-            }}
-            placeholder="Type your answer here..."
-            className="min-h-[100px]"
-            disabled={hasResult}
-          />
+          
+          {parsedMCQ.isMCQ ? (
+            // MCQ: Show radio buttons
+            <RadioGroup
+              value={currentAnswer}
+              onValueChange={(value) => {
+                setUserAnswers(prev => ({ ...prev, [currentExercise.id]: value }));
+                setShowResult(false);
+              }}
+              disabled={hasResult}
+              className="space-y-3"
+            >
+              <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer">
+                <RadioGroupItem value="A" id="option-a" />
+                <Label htmlFor="option-a" className="flex-1 cursor-pointer">
+                  <span className="font-semibold mr-2">A)</span>
+                  {parsedMCQ.options.A}
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer">
+                <RadioGroupItem value="B" id="option-b" />
+                <Label htmlFor="option-b" className="flex-1 cursor-pointer">
+                  <span className="font-semibold mr-2">B)</span>
+                  {parsedMCQ.options.B}
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer">
+                <RadioGroupItem value="C" id="option-c" />
+                <Label htmlFor="option-c" className="flex-1 cursor-pointer">
+                  <span className="font-semibold mr-2">C)</span>
+                  {parsedMCQ.options.C}
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer">
+                <RadioGroupItem value="D" id="option-d" />
+                <Label htmlFor="option-d" className="flex-1 cursor-pointer">
+                  <span className="font-semibold mr-2">D)</span>
+                  {parsedMCQ.options.D}
+                </Label>
+              </div>
+            </RadioGroup>
+          ) : (
+            // Fill-in-the-blank or Rewrite: Show textarea
+            <Textarea
+              value={currentAnswer}
+              onChange={(e) => {
+                setUserAnswers(prev => ({ ...prev, [currentExercise.id]: e.target.value }));
+                setShowResult(false);
+              }}
+              placeholder="Type your answer here..."
+              className="min-h-[100px]"
+              disabled={hasResult}
+            />
+          )}
         </div>
 
         {hasResult && (
@@ -173,9 +270,50 @@ export function ExerciseRunner({
             </div>
             {!isCorrect && (
               <div className="mt-2">
-                <p className="text-sm text-muted-foreground">Correct answer{currentExercise.answer.includes('|') || currentExercise.answer.includes(',') ? 's' : ''}:</p>
+                <p className="text-sm text-muted-foreground">Correct answer{parsedMCQ.isMCQ || currentExercise.answer.includes('|') || currentExercise.answer.includes(',') ? 's' : ''}:</p>
                 <div className="font-medium">
-                  {currentExercise.answer.includes('|') || currentExercise.answer.includes(',') ? (
+                  {parsedMCQ.isMCQ ? (
+                    <div className="mt-2">
+                      {parsedMCQ.correctAnswer.includes('|') || parsedMCQ.correctAnswer.includes(',') ? (
+                        <ul className="list-disc list-inside space-y-1">
+                          {(parsedMCQ.correctAnswer.includes('|') 
+                            ? parsedMCQ.correctAnswer.split('|') 
+                            : parsedMCQ.correctAnswer.split(',')
+                          ).map((ans, idx) => {
+                            const trimmed = ans.trim();
+                            const letterMatch = trimmed.match(/^([A-D])\)/i);
+                            if (letterMatch) {
+                              const letter = letterMatch[1].toUpperCase();
+                              const optionText = parsedMCQ.options[letter as keyof typeof parsedMCQ.options];
+                              return (
+                                <li key={idx}>
+                                  <span className="font-semibold">{letter})</span> {optionText}
+                                </li>
+                              );
+                            }
+                            return <li key={idx}>{trimmed}</li>;
+                          })}
+                        </ul>
+                      ) : (
+                        <div>
+                          {parsedMCQ.correctAnswer.match(/^([A-D])\)/i) ? (
+                            (() => {
+                              const letterMatch = parsedMCQ.correctAnswer.match(/^([A-D])\)/i);
+                              const letter = letterMatch![1].toUpperCase();
+                              const optionText = parsedMCQ.options[letter as keyof typeof parsedMCQ.options];
+                              return (
+                                <p>
+                                  <span className="font-semibold">{letter})</span> {optionText}
+                                </p>
+                              );
+                            })()
+                          ) : (
+                            <p>{parsedMCQ.correctAnswer}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : currentExercise.answer.includes('|') || currentExercise.answer.includes(',') ? (
                     <ul className="list-disc list-inside space-y-1 mt-1">
                       {(currentExercise.answer.includes('|') 
                         ? currentExercise.answer.split('|') 
@@ -197,7 +335,7 @@ export function ExerciseRunner({
           {!hasResult ? (
             <Button
               onClick={handleCheck}
-              disabled={!currentAnswer.trim() || isChecking}
+              disabled={!currentAnswer || isChecking}
               className="flex-1"
             >
               {isChecking ? (

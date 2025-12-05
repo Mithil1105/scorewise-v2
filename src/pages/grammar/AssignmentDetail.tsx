@@ -47,8 +47,46 @@ export default function AssignmentDetail() {
 
   const loadExercises = async (assignment: GrammarManualAssignment) => {
     try {
+      // Use exercise_set_ids (new structure) or fallback to exercise_ids (old structure)
+      const exerciseSetIds = assignment.exercise_set_ids || [];
       const exerciseIds = assignment.exercise_ids || [];
-      if (exerciseIds.length === 0) return;
+
+      // If using new structure (exercise_set_ids)
+      if (exerciseSetIds.length > 0) {
+        // Load all questions from all selected exercise sets
+        const { data: questions, error: questionsError } = await supabase
+          .from('grammar_questions')
+          .select('*')
+          .in('exercise_set_id', exerciseSetIds)
+          .order('exercise_set_id, question_order');
+
+        if (questionsError) {
+          console.error("Error loading questions:", questionsError);
+          return;
+        }
+
+        if (questions && questions.length > 0) {
+          // Convert questions to exercise format for ExerciseRunner
+          const exercisesData = questions.map(q => ({
+            id: q.id,
+            question: q.question,
+            answer: q.answer,
+            use_ai_check: false,
+            exercise_set_id: q.exercise_set_id
+          }));
+
+          setExercises(exercisesData);
+        } else {
+          setExercises([]);
+        }
+        return;
+      }
+
+      // Fallback to old structure (exercise_ids) for backward compatibility
+      if (exerciseIds.length === 0) {
+        setExercises([]);
+        return;
+      }
 
       // Determine source type and load accordingly
       if (assignment.source_type === 'predefined' || assignment.topic_type === 'predefined') {
@@ -72,6 +110,7 @@ export default function AssignmentDetail() {
       }
     } catch (error) {
       console.error("Error loading exercises:", error);
+      setExercises([]);
     }
   };
 
@@ -82,22 +121,70 @@ export default function AssignmentDetail() {
       const exerciseSourceType: GrammarExerciseSourceType = 
         assignment.source_type === 'predefined' ? 'predefined' : 'custom';
 
-      const attempts = results.map(result => ({
-        student_id: user.id,
-        assignment_type: 'manual' as const,
-        assignment_id: assignment.id,
-        exercise_id: result.exerciseId,
-        exercise_source_type: exerciseSourceType,
-        user_answer: result.userAnswer,
-        is_correct: result.isCorrect,
-        score: result.isCorrect ? 1.0 : 0.0
-      }));
+      // Get exercise_set_id and question_id from exercises array
+      const attempts = results.map(result => {
+        const exercise = exercises.find(ex => ex.id === result.exerciseId);
+        return {
+          student_id: user.id,
+          assignment_type: 'manual' as const,
+          assignment_id: assignment.id,
+          exercise_id: result.exerciseId, // Keep for backward compatibility
+          exercise_set_id: exercise?.exercise_set_id || null, // New field
+          question_id: result.exerciseId, // question_id is the same as exerciseId for new structure
+          exercise_source_type: exerciseSourceType,
+          user_answer: result.userAnswer,
+          is_correct: result.isCorrect,
+          score: result.isCorrect ? 1.0 : 0.0
+        };
+      });
 
-      const { error } = await supabase
+      const { error: attemptsError } = await supabase
         .from('grammar_attempts')
         .insert(attempts);
 
-      if (error) throw error;
+      if (attemptsError) throw attemptsError;
+
+      // Create completion records for each unique exercise_set_id
+      const exerciseSetMap = new Map<string, { correct: number; total: number }>();
+      
+      results.forEach(result => {
+        const exercise = exercises.find(ex => ex.id === result.exerciseId);
+        const exerciseSetId = exercise?.exercise_set_id;
+        if (exerciseSetId) {
+          if (!exerciseSetMap.has(exerciseSetId)) {
+            exerciseSetMap.set(exerciseSetId, { correct: 0, total: 0 });
+          }
+          const stats = exerciseSetMap.get(exerciseSetId)!;
+          stats.total++;
+          if (result.isCorrect) {
+            stats.correct++;
+          }
+        }
+      });
+
+      // Create completion records for each exercise set
+      const completionPromises = Array.from(exerciseSetMap.entries()).map(([exerciseSetId, stats]) => {
+        return supabase
+          .from('grammar_exercise_completions')
+          .upsert({
+            student_id: user.id,
+            exercise_set_id: exerciseSetId,
+            assignment_type: 'manual',
+            assignment_id: assignment.id,
+            total_questions: stats.total,
+            correct_answers: stats.correct,
+            incorrect_answers: stats.total - stats.correct,
+            score: stats.correct
+          }, {
+            onConflict: 'student_id,exercise_set_id,assignment_type,assignment_id'
+          });
+      });
+
+      const completionResults = await Promise.all(completionPromises);
+      const completionErrors = completionResults.filter(r => r.error);
+      if (completionErrors.length > 0) {
+        console.error("Error saving completions:", completionErrors);
+      }
 
       setShowPractice(false);
       navigate('/grammar');

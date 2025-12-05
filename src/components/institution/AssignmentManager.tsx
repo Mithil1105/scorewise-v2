@@ -17,6 +17,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -32,7 +42,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { 
   Plus, Loader2, ClipboardList, Calendar, Users, 
   FileText, MoreHorizontal, Eye, Trash2, Clock, 
-  BookOpen, GraduationCap, Sparkles, Info, Image as ImageIcon, X, Search, Check, CheckCircle2, CheckSquare
+  BookOpen, GraduationCap, Sparkles, Info, Image as ImageIcon, X, Search, Check, CheckCircle2, CheckSquare, XCircle
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -124,10 +134,17 @@ export function AssignmentManager() {
   const [saving, setSaving] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [exerciseSetSearchTerm, setExerciseSetSearchTerm] = useState('');
   const [viewSubmissionsOpen, setViewSubmissionsOpen] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [selectedSubmissionDetails, setSelectedSubmissionDetails] = useState<any>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [scoreOverride, setScoreOverride] = useState<{ [questionId: string]: boolean }>({});
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
+  const [pendingOverride, setPendingOverride] = useState<{ attemptId: string; newStatus: boolean; question: any } | null>(null);
+  const [updateAnswerScope, setUpdateAnswerScope] = useState<'global' | 'per-student' | 'skip'>('skip');
 
   const [newAssignment, setNewAssignment] = useState({
     title: '',
@@ -316,6 +333,7 @@ export function AssignmentManager() {
     if (!activeInstitution) return;
     setLoading(true);
     try {
+      // Fetch regular assignments
       const { data, error } = await supabase
         .from('assignments')
         .select(`
@@ -327,25 +345,96 @@ export function AssignmentManager() {
 
       if (error) throw error;
 
-      // Fetch submission counts
-      const assignmentIds = data?.map(a => a.id) || [];
-      const { data: submissions } = await supabase
-        .from('assignment_submissions')
-        .select('assignment_id')
-        .in('assignment_id', assignmentIds);
+      // Fetch grammar manual assignments
+      const { data: grammarAssignments, error: grammarError } = await supabase
+        .from('grammar_manual_assignments')
+        .select('*')
+        .eq('institute_id', activeInstitution.id)
+        .order('created_at', { ascending: false });
 
+      if (grammarError) {
+        console.error('Error fetching grammar assignments:', grammarError);
+      }
+
+      // Convert grammar assignments to match Assignment interface
+      const convertedGrammarAssignments: Assignment[] = (grammarAssignments || []).map(ga => ({
+        id: ga.id,
+        institution_id: ga.institute_id,
+        batch_id: null,
+        created_by: ga.teacher_id,
+        title: ga.title,
+        topic: 'Grammar Exercise',
+        exam_type: 'GRAMMAR',
+        instructions: null,
+        due_date: ga.due_date,
+        max_word_count: null,
+        min_word_count: null,
+        image_url: null,
+        is_active: true,
+        created_at: ga.created_at,
+        batch: null,
+        submissionCount: 0 // Will be fetched below
+      }));
+
+      // Combine regular and grammar assignments
+      const allAssignments = [...(data || []), ...convertedGrammarAssignments];
+
+      // Fetch submission counts for regular assignments
+      const regularAssignmentIds = (data || []).map(a => a.id);
       const countMap = new Map<string, number>();
-      submissions?.forEach(s => {
-        countMap.set(s.assignment_id, (countMap.get(s.assignment_id) || 0) + 1);
-      });
+      
+      if (regularAssignmentIds.length > 0) {
+        const { data: submissions } = await supabase
+          .from('assignment_submissions')
+          .select('assignment_id')
+          .in('assignment_id', regularAssignmentIds);
+
+        submissions?.forEach(s => {
+          countMap.set(s.assignment_id, (countMap.get(s.assignment_id) || 0) + 1);
+        });
+      }
+
+      // Fetch submission counts for grammar assignments (from grammar_attempts)
+      const grammarAssignmentIds = (grammarAssignments || []).map(ga => ga.id);
+      const grammarCountMap = new Map<string, number>();
+      
+      if (grammarAssignmentIds.length > 0) {
+        // Count unique students who have attempted questions from these assignments
+        const { data: grammarAttempts } = await supabase
+          .from('grammar_attempts')
+          .select('assignment_id, student_id')
+          .eq('assignment_type', 'manual')
+          .in('assignment_id', grammarAssignmentIds);
+
+        const uniqueSubmissions = new Map<string, Set<string>>();
+        grammarAttempts?.forEach(attempt => {
+          if (attempt.assignment_id) {
+            if (!uniqueSubmissions.has(attempt.assignment_id)) {
+              uniqueSubmissions.set(attempt.assignment_id, new Set());
+            }
+            uniqueSubmissions.get(attempt.assignment_id)!.add(attempt.student_id);
+          }
+        });
+
+        uniqueSubmissions.forEach((students, assignmentId) => {
+          grammarCountMap.set(assignmentId, students.size);
+        });
+      }
 
       // Filter out invalid assignments and enrich with submission counts
-      const enrichedAssignments = (data || [])
-        .filter(a => a && a.id && a.title && a.topic) // Only include valid assignments
+      const enrichedAssignments = allAssignments
+        .filter(a => a && a.id && a.title) // Only include valid assignments (grammar assignments have topic set)
         .map(a => ({
           ...a,
-          submissionCount: countMap.get(a.id) || 0
+          submissionCount: a.exam_type === 'GRAMMAR' 
+            ? (grammarCountMap.get(a.id) || 0)
+            : (countMap.get(a.id) || 0)
         }));
+
+      // Sort by created_at descending
+      enrichedAssignments.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
 
       setAssignments(enrichedAssignments as any);
     } catch (err) {
@@ -518,6 +607,7 @@ export function AssignmentManager() {
               const student = students.find(s => s.id === id);
               return student?.user_id;
             }).filter(Boolean) as string[] : null,
+            exercise_ids: [], // Empty array for backward compatibility (deprecated field)
             exercise_set_ids: newAssignment.grammar_exercise_set_ids,
             due_date: dueDateISO ? dueDateISO.split('T')[0] : null
           })
@@ -547,6 +637,7 @@ export function AssignmentManager() {
         setSelectedDate(undefined);
         setImageFile(null);
         setSelectedStudentIds([]);
+        setExerciseSetSearchTerm('');
         setCreateOpen(false);
         fetchAssignments();
         return;
@@ -635,6 +726,7 @@ export function AssignmentManager() {
       setImagePreview(null);
       setSelectedStudentIds([]);
       setStudentSearchTerm('');
+      setExerciseSetSearchTerm('');
       setCreateOpen(false);
       fetchAssignments();
     } catch (err: any) {
@@ -661,14 +753,37 @@ export function AssignmentManager() {
     }
 
     try {
-      const { error } = await supabase
-        .from('assignments')
-        .delete()
-        .eq('id', assignmentId.trim());
+      // Check if it's a grammar assignment by looking at the assignments list
+      const assignment = assignments.find(a => {
+        if (typeof a === 'object' && 'isGroup' in a && a.isGroup) return false;
+        if (typeof a === 'object' && 'id' in a) return a.id === assignmentId.trim();
+        return false;
+      });
+      
+      const isGrammarAssignment = assignment && 'exam_type' in assignment && assignment.exam_type === 'GRAMMAR';
 
-      if (error) {
-        console.error('Delete error:', error);
-        throw error;
+      if (isGrammarAssignment) {
+        // Delete from grammar_manual_assignments
+        const { error } = await supabase
+          .from('grammar_manual_assignments')
+          .delete()
+          .eq('id', assignmentId.trim());
+        
+        if (error) {
+          console.error('Delete error:', error);
+          throw error;
+        }
+      } else {
+        // Delete from regular assignments table
+        const { error } = await supabase
+          .from('assignments')
+          .delete()
+          .eq('id', assignmentId.trim());
+
+        if (error) {
+          console.error('Delete error:', error);
+          throw error;
+        }
       }
 
       toast({ title: 'Assignment deleted', description: 'The assignment has been successfully deleted.' });
@@ -684,6 +799,22 @@ export function AssignmentManager() {
     setLoadingSubmissions(true);
     
     try {
+      // Check if this is a grammar assignment
+      const assignment = assignments.find(a => {
+        if (typeof a === 'object' && 'isGroup' in a && a.isGroup) return false;
+        if (typeof a === 'object' && 'id' in a) return a.id === assignmentId;
+        return false;
+      });
+      
+      const isGrammarAssignment = assignment && 'exam_type' in assignment && assignment.exam_type === 'GRAMMAR';
+      
+      if (isGrammarAssignment) {
+        // Handle grammar assignment submissions
+        await loadGrammarSubmissions(assignmentId);
+        setLoadingSubmissions(false);
+        return;
+      }
+      
       // SIMPLE APPROACH: Fetch all submissions first, then enrich with member/essay data
       // This is the most reliable way to ensure we see all submissions
       const { data: submissionsData, error: submissionsError } = await supabase
@@ -872,9 +1003,764 @@ export function AssignmentManager() {
     }
   };
 
+  const loadGrammarSubmissions = async (assignmentId: string) => {
+    try {
+      // Fetch grammar assignment details
+      const { data: grammarAssignment, error: assignmentError } = await supabase
+        .from('grammar_manual_assignments')
+        .select('*')
+        .eq('id', assignmentId)
+        .single();
+
+      if (assignmentError) throw assignmentError;
+      if (!grammarAssignment) {
+        setSubmissions([]);
+        return;
+      }
+
+      // Fetch all completions for this assignment
+      const { data: completions, error: completionsError } = await supabase
+        .from('grammar_exercise_completions')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .eq('assignment_type', 'manual')
+        .order('completed_at', { ascending: false });
+
+      if (completionsError) {
+        console.error('Error fetching completions:', completionsError);
+        // Don't throw - try to fetch from attempts instead
+      }
+
+      // If no completions, try to get from attempts (for backwards compatibility)
+      if (!completions || completions.length === 0) {
+        // Fetch attempts to see if students have submitted
+        const { data: attemptsData, error: attemptsError } = await supabase
+          .from('grammar_attempts')
+          .select('student_id, submitted_at')
+          .eq('assignment_id', assignmentId)
+          .eq('assignment_type', 'manual')
+          .order('submitted_at', { ascending: false });
+
+        if (attemptsError) {
+          console.error('Error fetching attempts:', attemptsError);
+        }
+
+        if (!attemptsData || attemptsData.length === 0) {
+          setSubmissions([]);
+          return;
+        }
+
+        // Group attempts by student to create submission records
+        const studentAttemptsMap = new Map<string, any>();
+        attemptsData.forEach((attempt: any) => {
+          if (!studentAttemptsMap.has(attempt.student_id)) {
+            studentAttemptsMap.set(attempt.student_id, {
+              student_id: attempt.student_id,
+              submitted_at: attempt.submitted_at
+            });
+          } else {
+            // Update to most recent submission
+            const existing = studentAttemptsMap.get(attempt.student_id);
+            if (new Date(attempt.submitted_at) > new Date(existing.submitted_at)) {
+              existing.submitted_at = attempt.submitted_at;
+            }
+          }
+        });
+
+        // Get unique student IDs from attempts
+        const studentIds = Array.from(studentAttemptsMap.keys());
+        
+        // Fetch student member records
+        const { data: membersData, error: membersError } = await supabase
+          .from('institution_members')
+          .select('id, user_id, institution_id')
+          .in('user_id', studentIds)
+          .eq('institution_id', grammarAssignment.institute_id)
+          .eq('status', 'active');
+
+        if (membersError) throw membersError;
+
+        // Fetch profiles
+        const userIds = membersData?.map(m => m.user_id) || [];
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('user_id, display_name, avatar_url')
+          .in('user_id', userIds);
+
+        // Fetch exercise set details
+        const exerciseSetIds = grammarAssignment.exercise_set_ids || [];
+        const { data: exerciseSets } = await supabase
+          .from('grammar_exercise_sets')
+          .select('id, title')
+          .in('id', exerciseSetIds);
+
+        // Fetch all attempts for detailed analysis
+        const { data: attempts, error: attemptsError2 } = await supabase
+          .from('grammar_attempts')
+          .select('*')
+          .eq('assignment_id', assignmentId)
+          .eq('assignment_type', 'manual')
+          .order('submitted_at', { ascending: false });
+
+        if (attemptsError2) {
+          console.error('Error fetching attempts:', attemptsError2);
+        }
+
+        // Group completions by student
+        const studentMap = new Map(membersData?.map(m => [m.user_id, m]) || []);
+        const profileMap = new Map((profilesData || []).map(p => [p.user_id, p]));
+        const exerciseSetMap = new Map((exerciseSets || []).map(es => [es.id, es]));
+
+        // Create submission objects grouped by student
+        const studentSubmissionsMap = new Map<string, any>();
+
+        studentAttemptsMap.forEach((attemptInfo, studentId) => {
+          const member = studentMap.get(studentId);
+          const profile = member ? profileMap.get(member.user_id) : null;
+          
+          studentSubmissionsMap.set(studentId, {
+            id: `grammar-${studentId}-${assignmentId}`,
+            member_id: member?.id || null,
+            student_id: studentId,
+            assignment_id: assignmentId,
+            status: 'submitted',
+            submitted_at: attemptInfo.submitted_at,
+            member: member ? {
+              user_id: member.user_id,
+              profile: profile || null
+            } : null,
+            grammar_data: {
+              completions: [],
+              total_questions: 0,
+              total_correct: 0,
+              total_incorrect: 0,
+              exercise_sets_completed: 0,
+              overall_score: 0,
+              overall_accuracy: 0
+            }
+          });
+        });
+
+        // Calculate overall scores and attach attempt details
+        const attemptsByStudent = new Map<string, any[]>();
+        (attempts || []).forEach(attempt => {
+          if (!attemptsByStudent.has(attempt.student_id)) {
+            attemptsByStudent.set(attempt.student_id, []);
+          }
+          attemptsByStudent.get(attempt.student_id)!.push(attempt);
+        });
+
+        const enrichedSubmissions = Array.from(studentSubmissionsMap.values()).map(submission => {
+          const studentAttempts = attemptsByStudent.get(submission.student_id) || [];
+          const exerciseSetAttempts = new Map<string, { correct: number; total: number; attempts: any[] }>();
+
+          studentAttempts.forEach(attempt => {
+            if (attempt.exercise_set_id) {
+              if (!exerciseSetAttempts.has(attempt.exercise_set_id)) {
+                exerciseSetAttempts.set(attempt.exercise_set_id, { correct: 0, total: 0, attempts: [] });
+              }
+              const stats = exerciseSetAttempts.get(attempt.exercise_set_id)!;
+              stats.total++;
+              if (attempt.is_correct) stats.correct++;
+              stats.attempts.push(attempt);
+            }
+          });
+
+          const totalQuestions = studentAttempts.length;
+          const totalCorrect = studentAttempts.filter(a => a.is_correct).length;
+          const totalIncorrect = totalQuestions - totalCorrect;
+          
+          submission.grammar_data.total_questions = totalQuestions;
+          submission.grammar_data.total_correct = totalCorrect;
+          submission.grammar_data.total_incorrect = totalIncorrect;
+          submission.grammar_data.overall_score = totalCorrect;
+          submission.grammar_data.overall_accuracy = totalQuestions > 0 
+            ? Math.round((totalCorrect / totalQuestions) * 100) 
+            : 0;
+          submission.grammar_data.exercise_sets_completed = exerciseSetAttempts.size;
+          submission.grammar_data.exercise_set_details = Array.from(exerciseSetAttempts.entries()).map(([setId, stats]) => ({
+            exercise_set_id: setId,
+            exercise_set_title: exerciseSetMap.get(setId)?.title || 'Unknown Exercise',
+            correct: stats.correct,
+            total: stats.total,
+            accuracy: stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0,
+            attempts: stats.attempts
+          }));
+
+          return submission;
+        });
+
+        // Sort by completion date (most recent first)
+        enrichedSubmissions.sort((a, b) => {
+          if (!a.submitted_at) return 1;
+          if (!b.submitted_at) return -1;
+          return new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
+        });
+
+        setSubmissions(enrichedSubmissions as Submission[]);
+        return;
+      }
+
+      // Get unique student IDs
+      const studentIds = [...new Set(completions.map(c => c.student_id))];
+
+      // Fetch student member records
+      const { data: membersData, error: membersError } = await supabase
+        .from('institution_members')
+        .select('id, user_id, institution_id')
+        .in('user_id', studentIds)
+        .eq('institution_id', grammarAssignment.institute_id)
+        .eq('status', 'active');
+
+      if (membersError) throw membersError;
+
+      // Fetch profiles
+      const userIds = membersData?.map(m => m.user_id) || [];
+      const { data: profilesData } = await supabase
+        .from('profiles')
+        .select('user_id, display_name, avatar_url')
+        .in('user_id', userIds);
+
+      // Fetch exercise set details
+      const exerciseSetIds = grammarAssignment.exercise_set_ids || [];
+      const { data: exerciseSets } = await supabase
+        .from('grammar_exercise_sets')
+        .select('id, title')
+        .in('id', exerciseSetIds);
+
+      // Fetch all attempts for detailed analysis
+      const { data: attempts, error: attemptsError } = await supabase
+        .from('grammar_attempts')
+        .select('*')
+        .eq('assignment_id', assignmentId)
+        .eq('assignment_type', 'manual')
+        .order('submitted_at', { ascending: false });
+
+      if (attemptsError) {
+        console.error('Error fetching attempts:', attemptsError);
+      }
+
+      // Group completions by student
+      const studentMap = new Map(membersData?.map(m => [m.user_id, m]) || []);
+      const profileMap = new Map((profilesData || []).map(p => [p.user_id, p]));
+      const exerciseSetMap = new Map((exerciseSets || []).map(es => [es.id, es]));
+
+      // Create submission objects grouped by student
+      const studentSubmissionsMap = new Map<string, any>();
+
+      completions.forEach(completion => {
+        const studentId = completion.student_id;
+        if (!studentSubmissionsMap.has(studentId)) {
+          const member = studentMap.get(studentId);
+          const profile = member ? profileMap.get(member.user_id) : null;
+          
+          studentSubmissionsMap.set(studentId, {
+            id: `grammar-${studentId}-${assignmentId}`,
+            member_id: member?.id || null,
+            student_id: studentId,
+            assignment_id: assignmentId,
+            status: 'submitted',
+            submitted_at: completion.completed_at,
+            member: member ? {
+              user_id: member.user_id,
+              profile: profile || null
+            } : null,
+            grammar_data: {
+              completions: [],
+              total_questions: 0,
+              total_correct: 0,
+              total_incorrect: 0,
+              exercise_sets_completed: 0,
+              overall_score: 0,
+              overall_accuracy: 0
+            }
+          });
+        }
+
+        const submission = studentSubmissionsMap.get(studentId)!;
+        submission.grammar_data.completions.push(completion);
+        submission.grammar_data.total_questions += completion.total_questions;
+        submission.grammar_data.total_correct += completion.correct_answers;
+        submission.grammar_data.total_incorrect += completion.incorrect_answers;
+        submission.grammar_data.exercise_sets_completed += 1;
+      });
+
+      // Calculate overall scores and attach attempt details
+      const attemptsByStudent = new Map<string, any[]>();
+      (attempts || []).forEach(attempt => {
+        if (!attemptsByStudent.has(attempt.student_id)) {
+          attemptsByStudent.set(attempt.student_id, []);
+        }
+        attemptsByStudent.get(attempt.student_id)!.push(attempt);
+      });
+
+      const enrichedSubmissions = Array.from(studentSubmissionsMap.values()).map(submission => {
+        const studentAttempts = attemptsByStudent.get(submission.student_id) || [];
+        const exerciseSetAttempts = new Map<string, { correct: number; total: number; attempts: any[] }>();
+
+        // Recalculate from attempts (which includes overrides) instead of using stale completion data
+        studentAttempts.forEach(attempt => {
+          if (attempt.exercise_set_id) {
+            if (!exerciseSetAttempts.has(attempt.exercise_set_id)) {
+              exerciseSetAttempts.set(attempt.exercise_set_id, { correct: 0, total: 0, attempts: [] });
+            }
+            const stats = exerciseSetAttempts.get(attempt.exercise_set_id)!;
+            stats.total++;
+            if (attempt.is_correct) stats.correct++; // This will use the overridden value from database
+            stats.attempts.push(attempt);
+          }
+        });
+
+        // Recalculate totals from attempts (source of truth after overrides)
+        const recalculatedTotalQuestions = studentAttempts.length;
+        const recalculatedTotalCorrect = studentAttempts.filter(a => a.is_correct).length;
+        const recalculatedTotalIncorrect = recalculatedTotalQuestions - recalculatedTotalCorrect;
+        
+        // Update submission with recalculated values from attempts
+        submission.grammar_data.total_questions = recalculatedTotalQuestions;
+        submission.grammar_data.total_correct = recalculatedTotalCorrect;
+        submission.grammar_data.total_incorrect = recalculatedTotalIncorrect;
+        submission.grammar_data.overall_score = recalculatedTotalCorrect;
+        submission.grammar_data.overall_accuracy = recalculatedTotalQuestions > 0 
+          ? Math.round((recalculatedTotalCorrect / recalculatedTotalQuestions) * 100) 
+          : 0;
+        submission.grammar_data.exercise_set_details = Array.from(exerciseSetAttempts.entries()).map(([setId, stats]) => ({
+          exercise_set_id: setId,
+          exercise_set_title: exerciseSetMap.get(setId)?.title || 'Unknown Exercise',
+          correct: stats.correct,
+          total: stats.total,
+          accuracy: stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0,
+          attempts: stats.attempts
+        }));
+        
+        // Store all attempts for detailed view
+        submission.grammar_data.all_attempts = studentAttempts;
+
+        return submission;
+      });
+
+      // Sort by completion date (most recent first)
+      enrichedSubmissions.sort((a, b) => {
+        if (!a.submitted_at) return 1;
+        if (!b.submitted_at) return -1;
+        return new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
+      });
+
+      setSubmissions(enrichedSubmissions as Submission[]);
+    } catch (err: any) {
+      console.error('Error loading grammar submissions:', err);
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to load grammar submissions',
+        variant: 'destructive'
+      });
+      setSubmissions([]);
+    }
+  };
+
   const isOverdue = (dueDate: string | null) => {
     if (!dueDate) return false;
     return new Date(dueDate) < new Date();
+  };
+
+  const loadSubmissionDetails = async (submission: any) => {
+    try {
+      console.log('Loading submission details for:', submission);
+      
+      // Fetch all attempts with question details
+      const { data: attempts, error: attemptsError } = await supabase
+        .from('grammar_attempts')
+        .select('*')
+        .eq('assignment_id', submission.assignment_id)
+        .eq('assignment_type', 'manual')
+        .eq('student_id', submission.student_id)
+        .order('submitted_at', { ascending: true });
+
+      if (attemptsError) {
+        console.error('Error fetching attempts:', attemptsError);
+        toast({
+          title: 'Error',
+          description: 'Failed to load submission details',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      if (!attempts || attempts.length === 0) {
+        console.log('No attempts found for submission');
+        setSelectedSubmissionDetails({
+          ...submission,
+          questions: []
+        });
+        return;
+      }
+
+      console.log('Found attempts:', attempts.length);
+      console.log('Sample attempt:', attempts[0]);
+
+      // Fetch all question details
+      const questionIds = [...new Set(attempts.map(a => a.question_id).filter(Boolean))];
+      const exerciseSetIds = [...new Set(attempts.map(a => a.exercise_set_id).filter(Boolean))];
+      const exerciseIds = [...new Set(attempts.map(a => a.exercise_id).filter(Boolean))];
+
+      console.log('Question IDs:', questionIds);
+      console.log('Exercise Set IDs:', exerciseSetIds);
+      console.log('Exercise IDs (fallback):', exerciseIds);
+
+      const questionsMap = new Map();
+      if (questionIds.length > 0) {
+        const { data: questions, error: questionsError } = await supabase
+          .from('grammar_questions')
+          .select('id, question, answer, exercise_set_id')
+          .in('id', questionIds);
+        
+        if (questionsError) {
+          console.error('Error fetching questions:', questionsError);
+        } else {
+          console.log('Fetched questions:', questions?.length);
+          questions?.forEach(q => questionsMap.set(q.id, q));
+        }
+      }
+
+      // Fallback: if question_id is not available, try using exercise_id
+      if (questionsMap.size === 0 && exerciseIds.length > 0) {
+        console.log('Trying fallback: fetching by exercise_id');
+        const { data: questionsByExerciseId, error: fallbackError } = await supabase
+          .from('grammar_questions')
+          .select('id, question, answer, exercise_set_id')
+          .in('id', exerciseIds);
+        
+        if (!fallbackError && questionsByExerciseId) {
+          questionsByExerciseId.forEach(q => questionsMap.set(q.id, q));
+          console.log('Fetched questions via fallback:', questionsByExerciseId.length);
+        }
+      }
+
+      const exerciseSetsMap = new Map();
+      if (exerciseSetIds.length > 0) {
+        const { data: exerciseSets, error: exerciseSetsError } = await supabase
+          .from('grammar_exercise_sets')
+          .select('id, title')
+          .in('id', exerciseSetIds);
+        
+        if (exerciseSetsError) {
+          console.error('Error fetching exercise sets:', exerciseSetsError);
+        } else {
+          exerciseSets?.forEach(es => exerciseSetsMap.set(es.id, es));
+        }
+      }
+
+      // Combine attempts with question details
+      const questionsWithDetails = attempts.map((attempt: any) => {
+        // Try to get question by question_id first, then by exercise_id
+        let question = questionsMap.get(attempt.question_id);
+        if (!question && attempt.exercise_id) {
+          question = questionsMap.get(attempt.exercise_id);
+        }
+        
+        const exerciseSet = exerciseSetsMap.get(attempt.exercise_set_id);
+        
+        console.log(`Attempt ${attempt.id}: question_id=${attempt.question_id}, exercise_id=${attempt.exercise_id}, found question:`, !!question);
+        
+        return {
+          attempt_id: attempt.id,
+          question_id: attempt.question_id || attempt.exercise_id,
+          exercise_set_id: attempt.exercise_set_id,
+          exercise_set_title: exerciseSet?.title || 'Unknown Exercise',
+          question: question?.question || 'N/A',
+          correct_answer: question?.answer || 'N/A',
+          student_answer: attempt.user_answer,
+          is_correct: attempt.is_correct,
+          submitted_at: attempt.submitted_at,
+          // Allow override
+          override_correct: null as boolean | null
+        };
+      });
+
+      console.log('Questions with details:', questionsWithDetails.length);
+      console.log('Sample question detail:', questionsWithDetails[0]);
+
+      setSelectedSubmissionDetails({
+        ...submission,
+        questions: questionsWithDetails
+      });
+      
+      // Initialize override state - preserve existing overrides if reloading
+      const overrideState: { [key: string]: boolean } = { ...scoreOverride };
+      questionsWithDetails.forEach((q: any) => {
+        // Only set if not already overridden
+        if (overrideState[q.attempt_id] === undefined) {
+          overrideState[q.attempt_id] = q.is_correct;
+        }
+      });
+      setScoreOverride(overrideState);
+    } catch (error: any) {
+      console.error('Error loading submission details:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load submission details',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleScoreOverride = (attemptId: string, newCorrectStatus: boolean) => {
+    // Find the question details
+    const question = selectedSubmissionDetails?.questions?.find((q: any) => q.attempt_id === attemptId);
+    if (!question) {
+      toast({
+        title: 'Error',
+        description: 'Question not found',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    // Check if we need to update accepted answers
+    const wasIncorrect = !question.is_correct;
+    const willBeCorrect = newCorrectStatus;
+    const needsAnswerUpdate = (wasIncorrect && willBeCorrect) || (!wasIncorrect && !willBeCorrect);
+
+    if (needsAnswerUpdate && question.question_id) {
+      // Show dialog to ask about updating accepted answers
+      setPendingOverride({ attemptId, newStatus: newCorrectStatus, question });
+      setOverrideDialogOpen(true);
+      setUpdateAnswerScope('skip');
+    } else {
+      // No answer update needed, proceed directly
+      performScoreOverride(attemptId, newCorrectStatus, question, 'skip');
+    }
+  };
+
+  const performScoreOverride = async (
+    attemptId: string, 
+    newCorrectStatus: boolean, 
+    question: any,
+    answerUpdateScope: 'global' | 'per-student' | 'skip'
+  ) => {
+    try {
+      // Update the attempt in database
+      const { data: updatedAttempt, error: attemptError } = await supabase
+        .from('grammar_attempts')
+        .update({ 
+          is_correct: newCorrectStatus,
+          score: newCorrectStatus ? 1.0 : 0.0
+        })
+        .eq('id', attemptId)
+        .select()
+        .single();
+
+      if (attemptError) {
+        console.error('Error updating attempt in database:', attemptError);
+        throw attemptError;
+      }
+
+      if (!updatedAttempt) {
+        throw new Error('Failed to update attempt - no data returned');
+      }
+
+      console.log('Successfully updated attempt in database:', updatedAttempt);
+
+      // Update accepted answers if requested
+      if (answerUpdateScope !== 'skip' && question.question_id) {
+        // Fetch current question
+        const { data: currentQuestion, error: questionError } = await supabase
+          .from('grammar_questions')
+          .select('answer')
+          .eq('id', question.question_id)
+          .single();
+
+        if (!questionError && currentQuestion) {
+          const currentAnswers = currentQuestion.answer.split(/[|,]/).map((a: string) => a.trim()).filter(Boolean);
+          const studentAnswer = question.student_answer.trim();
+          
+          if (newCorrectStatus) {
+            // Adding student answer as accepted
+            if (!currentAnswers.some((a: string) => a.toLowerCase() === studentAnswer.toLowerCase())) {
+              const updatedAnswers = answerUpdateScope === 'global' 
+                ? [...currentAnswers, studentAnswer].join('|')
+                : currentQuestion.answer; // Per-student would need a different approach
+              
+              if (answerUpdateScope === 'global') {
+                const { error: updateError } = await supabase
+                  .from('grammar_questions')
+                  .update({ answer: updatedAnswers })
+                  .eq('id', question.question_id);
+                
+                if (updateError) {
+                  console.error('Error updating question answer:', updateError);
+                } else {
+                  // Update local state
+                  question.correct_answer = updatedAnswers;
+                }
+              }
+            }
+          } else {
+            // Removing answer (if it was in the accepted list)
+            if (currentAnswers.some((a: string) => a.toLowerCase() === studentAnswer.toLowerCase())) {
+              const updatedAnswers = currentAnswers
+                .filter((a: string) => a.toLowerCase() !== studentAnswer.toLowerCase())
+                .join('|');
+              
+              if (answerUpdateScope === 'global') {
+                const { error: updateError } = await supabase
+                  .from('grammar_questions')
+                  .update({ answer: updatedAnswers })
+                  .eq('id', question.question_id);
+                
+                if (updateError) {
+                  console.error('Error updating question answer:', updateError);
+                } else {
+                  // Update local state
+                  question.correct_answer = updatedAnswers;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Update local state immediately for UI responsiveness
+      const updatedOverride = { ...scoreOverride, [attemptId]: newCorrectStatus };
+      setScoreOverride(updatedOverride);
+
+      // Update the submission details
+      if (selectedSubmissionDetails) {
+        const updatedQuestions = selectedSubmissionDetails.questions.map((q: any) => {
+          if (q.attempt_id === attemptId) {
+            return { 
+              ...q, 
+              is_correct: newCorrectStatus,
+              correct_answer: question.correct_answer || q.correct_answer
+            };
+          }
+          return q;
+        });
+        const updatedSubmission = {
+          ...selectedSubmissionDetails,
+          questions: updatedQuestions,
+          // Update grammar_data stats
+          grammar_data: {
+            ...selectedSubmissionDetails.grammar_data,
+            total_correct: updatedQuestions.filter((q: any) => {
+              const isCorrect = updatedOverride[q.attempt_id] !== undefined 
+                ? updatedOverride[q.attempt_id] 
+                : q.is_correct;
+              return isCorrect;
+            }).length,
+            total_incorrect: updatedQuestions.filter((q: any) => {
+              const isCorrect = updatedOverride[q.attempt_id] !== undefined 
+                ? updatedOverride[q.attempt_id] 
+                : q.is_correct;
+              return !isCorrect;
+            }).length,
+            overall_score: updatedQuestions.filter((q: any) => {
+              const isCorrect = updatedOverride[q.attempt_id] !== undefined 
+                ? updatedOverride[q.attempt_id] 
+                : q.is_correct;
+              return isCorrect;
+            }).length,
+            overall_accuracy: updatedQuestions.length > 0
+              ? Math.round((updatedQuestions.filter((q: any) => {
+                  const isCorrect = updatedOverride[q.attempt_id] !== undefined 
+                    ? updatedOverride[q.attempt_id] 
+                    : q.is_correct;
+                  return isCorrect;
+                }).length / updatedQuestions.length) * 100)
+              : 0
+          }
+        };
+        setSelectedSubmissionDetails(updatedSubmission);
+
+        // Recalculate and update completion records using updated override state
+        await recalculateSubmissionScore(updatedSubmission, updatedOverride);
+      }
+
+      // Refresh the main submissions list to show updated scores
+      if (selectedAssignmentId) {
+        // Small delay to ensure database is updated
+        setTimeout(async () => {
+          await loadGrammarSubmissions(selectedAssignmentId);
+        }, 500);
+      }
+
+      toast({
+        title: 'Score Updated',
+        description: answerUpdateScope === 'global' 
+          ? 'Score and accepted answers updated globally.'
+          : answerUpdateScope === 'per-student'
+          ? 'Score updated. Answer change is per-student only.'
+          : 'The score has been successfully overridden.',
+      });
+    } catch (error: any) {
+      console.error('Error overriding score:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to override score',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const recalculateSubmissionScore = async (submission: any, overrideState: { [key: string]: boolean }) => {
+    try {
+      // Recalculate completion records based on updated attempts
+      const exerciseSetGroups = new Map<string, { correct: number; total: number }>();
+      
+      // Use the provided override state
+      submission.questions.forEach((q: any) => {
+        const isCorrect = overrideState[q.attempt_id] !== undefined 
+          ? overrideState[q.attempt_id] 
+          : q.is_correct;
+        
+        if (!exerciseSetGroups.has(q.exercise_set_id)) {
+          exerciseSetGroups.set(q.exercise_set_id, { correct: 0, total: 0 });
+        }
+        const stats = exerciseSetGroups.get(q.exercise_set_id)!;
+        stats.total++;
+        if (isCorrect) stats.correct++;
+      });
+
+      // Update completion records to reflect overrides
+      const updatePromises = Array.from(exerciseSetGroups.entries()).map(async ([exerciseSetId, stats]) => {
+        const { data, error } = await supabase
+          .from('grammar_exercise_completions')
+          .update({
+            total_questions: stats.total,
+            correct_answers: stats.correct,
+            incorrect_answers: stats.total - stats.correct,
+            score: stats.correct,
+            completed_at: new Date().toISOString() // Update timestamp
+          })
+          .eq('student_id', submission.student_id)
+          .eq('assignment_id', submission.assignment_id)
+          .eq('assignment_type', 'manual')
+          .eq('exercise_set_id', exerciseSetId)
+          .select();
+        
+        if (error) {
+          console.error(`Error updating completion for exercise set ${exerciseSetId}:`, error);
+        } else {
+          console.log(`Updated completion for exercise set ${exerciseSetId}:`, data);
+        }
+        return { data, error };
+      });
+
+      const results = await Promise.all(updatePromises);
+      const errors = results.filter(r => r.error);
+      if (errors.length > 0) {
+        console.warn('Some completion records failed to update:', errors);
+      }
+
+      // Refresh submissions list to update the main view (but don't reload details to preserve overrides)
+      if (selectedAssignmentId) {
+        await loadGrammarSubmissions(selectedAssignmentId);
+        // DO NOT reload submission details here - it would reset the override state
+        // The local state is already updated, so we just need to update the main list
+      }
+    } catch (error: any) {
+      console.error('Error recalculating score:', error);
+    }
   };
 
   return (
@@ -1083,56 +1969,92 @@ export function AssignmentManager() {
                       {newAssignment.exam_type === 'GRAMMAR' && (
                         <div className="space-y-2">
                           <Label>Select Grammar Exercise Sets *</Label>
+                          
+                          {/* Search Bar */}
+                          {availableGrammarExerciseSets.length > 0 && (
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input
+                                placeholder="Search exercise sets..."
+                                value={exerciseSetSearchTerm}
+                                onChange={(e) => setExerciseSetSearchTerm(e.target.value)}
+                                className="pl-9"
+                              />
+                            </div>
+                          )}
+                          
                           <div className="border rounded-lg p-4 max-h-[300px] overflow-y-auto">
                             {availableGrammarExerciseSets.length === 0 ? (
                               <p className="text-sm text-muted-foreground text-center py-4">
                                 No grammar exercise sets available. Create some first!
                               </p>
-                            ) : (
-                              <div className="space-y-2">
-                                {availableGrammarExerciseSets.map((exerciseSet) => {
-                                  const topicName = (exerciseSet.grammar_topics as any)?.topic_name || 'General';
-                                  return (
-                                    <div
-                                      key={exerciseSet.id}
-                                      className="flex items-start gap-2 p-2 border rounded hover:bg-muted/50 cursor-pointer"
-                                      onClick={() => {
-                                        const isSelected = newAssignment.grammar_exercise_set_ids.includes(exerciseSet.id);
-                                        setNewAssignment(prev => ({
-                                          ...prev,
-                                          grammar_exercise_set_ids: isSelected
-                                            ? prev.grammar_exercise_set_ids.filter(id => id !== exerciseSet.id)
-                                            : [...prev.grammar_exercise_set_ids, exerciseSet.id]
-                                        }));
-                                      }}
-                                    >
-                                      <Checkbox
-                                        checked={newAssignment.grammar_exercise_set_ids.includes(exerciseSet.id)}
-                                        onCheckedChange={(checked) => {
+                            ) : (() => {
+                              // Filter exercise sets based on search term
+                              const filteredSets = availableGrammarExerciseSets.filter((exerciseSet) => {
+                                if (!exerciseSetSearchTerm.trim()) return true;
+                                const searchLower = exerciseSetSearchTerm.toLowerCase();
+                                const topicName = ((exerciseSet.grammar_topics as any)?.topic_name || 'General').toLowerCase();
+                                return (
+                                  exerciseSet.title.toLowerCase().includes(searchLower) ||
+                                  topicName.includes(searchLower) ||
+                                  exerciseSet.description?.toLowerCase().includes(searchLower)
+                                );
+                              });
+
+                              if (filteredSets.length === 0) {
+                                return (
+                                  <p className="text-sm text-muted-foreground text-center py-4">
+                                    No exercise sets match your search.
+                                  </p>
+                                );
+                              }
+
+                              return (
+                                <div className="space-y-2">
+                                  {filteredSets.map((exerciseSet) => {
+                                    const topicName = (exerciseSet.grammar_topics as any)?.topic_name || 'General';
+                                    return (
+                                      <div
+                                        key={exerciseSet.id}
+                                        className="flex items-start gap-2 p-2 border rounded hover:bg-muted/50 cursor-pointer"
+                                        onClick={() => {
+                                          const isSelected = newAssignment.grammar_exercise_set_ids.includes(exerciseSet.id);
                                           setNewAssignment(prev => ({
                                             ...prev,
-                                            grammar_exercise_set_ids: checked
-                                              ? [...prev.grammar_exercise_set_ids, exerciseSet.id]
-                                              : prev.grammar_exercise_set_ids.filter(id => id !== exerciseSet.id)
+                                            grammar_exercise_set_ids: isSelected
+                                              ? prev.grammar_exercise_set_ids.filter(id => id !== exerciseSet.id)
+                                              : [...prev.grammar_exercise_set_ids, exerciseSet.id]
                                           }));
                                         }}
-                                      />
-                                      <div className="flex-1">
-                                        <div className="font-medium">{exerciseSet.title}</div>
-                                        <div className="text-sm text-muted-foreground">
-                                          Topic: {topicName} • Difficulty: {exerciseSet.difficulty === 1 ? 'Easy' : exerciseSet.difficulty === 2 ? 'Medium' : 'Hard'}
-                                        </div>
-                                        {exerciseSet.description && (
-                                          <div className="text-xs text-muted-foreground mt-1">
-                                            {exerciseSet.description}
+                                      >
+                                        <Checkbox
+                                          checked={newAssignment.grammar_exercise_set_ids.includes(exerciseSet.id)}
+                                          onCheckedChange={(checked) => {
+                                            setNewAssignment(prev => ({
+                                              ...prev,
+                                              grammar_exercise_set_ids: checked
+                                                ? [...prev.grammar_exercise_set_ids, exerciseSet.id]
+                                                : prev.grammar_exercise_set_ids.filter(id => id !== exerciseSet.id)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1">
+                                          <div className="font-medium">{exerciseSet.title}</div>
+                                          <div className="text-sm text-muted-foreground">
+                                            Topic: {topicName} • Difficulty: {exerciseSet.difficulty === 1 ? 'Easy' : exerciseSet.difficulty === 2 ? 'Medium' : 'Hard'}
                                           </div>
-                                        )}
+                                          {exerciseSet.description && (
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                              {exerciseSet.description}
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })()}
                           </div>
                           {newAssignment.grammar_exercise_set_ids.length > 0 && (
                             <p className="text-xs text-muted-foreground">
@@ -1451,6 +2373,7 @@ export function AssignmentManager() {
                     setSelectedDate(undefined);
                     setImageFile(null);
                     setImagePreview(null);
+                    setExerciseSetSearchTerm('');
                   }}
                 >
                   Cancel
@@ -1460,7 +2383,9 @@ export function AssignmentManager() {
                   disabled={
                     saving || 
                     !newAssignment.title.trim() || 
-                    !newAssignment.topic.trim()
+                    (newAssignment.exam_type === 'GRAMMAR' 
+                      ? newAssignment.grammar_exercise_set_ids.length === 0
+                      : !newAssignment.topic.trim())
                   }
                 >
                   {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -1794,169 +2719,528 @@ export function AssignmentManager() {
             </div>
           ) : (
             <div className="space-y-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Student</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Submitted</TableHead>
-                    <TableHead>Word Count</TableHead>
-                    <TableHead>Score</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {submissions.map((submission) => (
-                    <TableRow key={submission.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={submission.member?.profile?.avatar_url || undefined} />
-                            <AvatarFallback>
-                              {submission.member?.profile?.display_name?.charAt(0) || 'S'}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">
-                            {submission.member?.profile?.display_name || 'Student'}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          // CRITICAL: Determine actual status - prioritize essay_id over stored status
-                          // If essay_id exists, it MUST be submitted (unless reviewed)
-                          const hasEssayId = !!submission.essay_id;
-                          const storedStatus = submission.status || 'pending';
-                          const isReviewed = storedStatus === 'reviewed';
-                          
-                          // If essay_id exists, it's definitely submitted (unless reviewed)
-                          const isSubmitted = hasEssayId || storedStatus === 'submitted';
-                          
-                          let statusText = 'Not Started';
-                          let variant: 'default' | 'outline' | 'secondary' = 'secondary';
-                          let className = '';
-                          
-                          if (isReviewed) {
-                            statusText = 'Reviewed';
-                            variant = 'default';
-                            className = 'bg-green-500';
-                          } else if (isSubmitted) {
-                            statusText = 'Submitted';
-                            variant = 'default';
-                            className = 'bg-blue-500';
-                          } else if (storedStatus === 'in_progress') {
-                            statusText = 'In Progress';
-                            variant = 'outline';
-                          } else if (storedStatus === 'not_started') {
-                            statusText = 'Not Started';
-                            variant = 'secondary';
-                          } else {
-                            statusText = 'Pending';
-                            variant = 'secondary';
-                          }
-                          
-                          // Debug log if status seems wrong
-                          if (hasEssayId && !isSubmitted && !isReviewed) {
-                            console.warn('Status mismatch detected:', {
-                              submission_id: submission.id,
-                              essay_id: submission.essay_id,
-                              stored_status: storedStatus,
-                              displayed_status: statusText
-                            });
-                          }
-                          
-                          return (
-                            <Badge variant={variant} className={className}>
-                              {statusText}
-                            </Badge>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          // If essay_id exists, it's definitely submitted
-                          const hasEssayId = !!submission.essay_id;
-                          const hasSubmittedAt = !!submission.submitted_at;
-                          
-                          if (hasSubmittedAt) {
-                            return (
+              {(() => {
+                // Check if this is a grammar assignment by checking first submission
+                const isGrammar = submissions.length > 0 && 'grammar_data' in submissions[0];
+                
+                if (isGrammar) {
+                  return (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Student</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Completed</TableHead>
+                          <TableHead>Exercise Sets</TableHead>
+                          <TableHead>Questions</TableHead>
+                          <TableHead>Score</TableHead>
+                          <TableHead>Accuracy</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {submissions.map((submission: any) => (
+                          <TableRow key={submission.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={submission.member?.profile?.avatar_url || undefined} />
+                                  <AvatarFallback>
+                                    {submission.member?.profile?.display_name?.charAt(0) || 'S'}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span className="font-medium">
+                                  {submission.member?.profile?.display_name || 'Student'}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="default" className="bg-blue-500">
+                                Completed
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {submission.submitted_at ? (
+                                <span className="text-sm">
+                                  {format(new Date(submission.submitted_at), 'MMM d, yyyy h:mm a')}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
                               <span className="text-sm">
-                                {format(new Date(submission.submitted_at), 'MMM d, yyyy h:mm a')}
+                                {submission.grammar_data?.exercise_sets_completed || 0} / {submission.grammar_data?.exercise_set_details?.length || 0}
                               </span>
-                            );
-                          } else if (hasEssayId) {
-                            // Has essay but no timestamp - still submitted
-                            return (
-                              <span className="text-sm text-muted-foreground">Submitted</span>
-                            );
-                          } else {
-                            return (
-                              <span className="text-muted-foreground text-sm">Not submitted</span>
-                            );
-                          }
-                        })()}
-                      </TableCell>
-                      <TableCell>
-                        {submission.essay?.word_count ? (
-                          <span className="text-sm">{submission.essay.word_count} words</span>
-                        ) : submission.essay_id ? (
-                          <span className="text-sm text-muted-foreground">Loading...</span>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {submission.teacher_score ? (
-                          <Badge variant="secondary">{submission.teacher_score}</Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => {
-                            // CRITICAL: Check essay_id first - if it exists, navigate to essay
-                            if (submission.essay_id) {
-                              console.log('Navigating to essay:', submission.essay_id);
-                              // Navigate to review assignment essay page - it handles RLS properly
-                              navigate(`/institution/review-essay/${submission.essay_id}`);
-                            } else {
-                              // No essay_id - check if status suggests it should exist
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm">
+                                {submission.grammar_data?.total_correct || 0} / {submission.grammar_data?.total_questions || 0}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">
+                                {submission.grammar_data?.overall_score || 0}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <span className={`text-sm font-medium ${
+                                (submission.grammar_data?.overall_accuracy || 0) >= 70 ? 'text-green-600' :
+                                (submission.grammar_data?.overall_accuracy || 0) >= 50 ? 'text-yellow-600' :
+                                'text-red-600'
+                              }`}>
+                                {submission.grammar_data?.overall_accuracy || 0}%
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={async () => {
+                                  // Load all question details for this submission
+                                  await loadSubmissionDetails(submission);
+                                  setDetailsDialogOpen(true);
+                                }}
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                View Details
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  );
+                }
+                
+                // Regular essay assignment view
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Student</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Submitted</TableHead>
+                        <TableHead>Word Count</TableHead>
+                        <TableHead>Score</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {submissions.map((submission) => (
+                        <TableRow key={submission.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-8 w-8">
+                                <AvatarImage src={submission.member?.profile?.avatar_url || undefined} />
+                                <AvatarFallback>
+                                  {submission.member?.profile?.display_name?.charAt(0) || 'S'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="font-medium">
+                                {submission.member?.profile?.display_name || 'Student'}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              // CRITICAL: Determine actual status - prioritize essay_id over stored status
+                              // If essay_id exists, it MUST be submitted (unless reviewed)
                               const hasEssayId = !!submission.essay_id;
-                              const isSubmitted = hasEssayId || submission.status === 'submitted' || submission.status === 'reviewed';
+                              const storedStatus = submission.status || 'pending';
+                              const isReviewed = storedStatus === 'reviewed';
                               
-                              if (isSubmitted && !hasEssayId) {
-                                // Status says submitted but no essay_id - data issue
-                                toast({ 
-                                  title: 'Essay not found', 
-                                  description: 'The submission is marked as submitted but the essay link is missing. The essay may still be processing. Please refresh the page.',
-                                  variant: 'destructive' 
-                                });
+                              // If essay_id exists, it's definitely submitted (unless reviewed)
+                              const isSubmitted = hasEssayId || storedStatus === 'submitted';
+                              
+                              let statusText = 'Not Started';
+                              let variant: 'default' | 'outline' | 'secondary' = 'secondary';
+                              let className = '';
+                              
+                              if (isReviewed) {
+                                statusText = 'Reviewed';
+                                variant = 'default';
+                                className = 'bg-green-500';
+                              } else if (isSubmitted) {
+                                statusText = 'Submitted';
+                                variant = 'default';
+                                className = 'bg-blue-500';
+                              } else if (storedStatus === 'in_progress') {
+                                statusText = 'In Progress';
+                                variant = 'outline';
+                              } else if (storedStatus === 'not_started') {
+                                statusText = 'Not Started';
+                                variant = 'secondary';
                               } else {
-                                toast({ 
-                                  title: 'No essay', 
-                                  description: 'Student has not submitted an essay yet.',
-                                  variant: 'destructive' 
+                                statusText = 'Pending';
+                                variant = 'secondary';
+                              }
+                              
+                              // Debug log if status seems wrong
+                              if (hasEssayId && !isSubmitted && !isReviewed) {
+                                console.warn('Status mismatch detected:', {
+                                  submission_id: submission.id,
+                                  essay_id: submission.essay_id,
+                                  stored_status: storedStatus,
+                                  displayed_status: statusText
                                 });
                               }
-                            }
-                          }}
-                          disabled={!submission.essay_id}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View Essay
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                              
+                              return (
+                                <Badge variant={variant} className={className}>
+                                  {statusText}
+                                </Badge>
+                              );
+                            })()}
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              // If essay_id exists, it's definitely submitted
+                              const hasEssayId = !!submission.essay_id;
+                              const hasSubmittedAt = !!submission.submitted_at;
+                              
+                              if (hasSubmittedAt) {
+                                return (
+                                  <span className="text-sm">
+                                    {format(new Date(submission.submitted_at), 'MMM d, yyyy h:mm a')}
+                                  </span>
+                                );
+                              } else if (hasEssayId) {
+                                // Has essay but no timestamp - still submitted
+                                return (
+                                  <span className="text-sm text-muted-foreground">Submitted</span>
+                                );
+                              } else {
+                                return (
+                                  <span className="text-muted-foreground text-sm">Not submitted</span>
+                                );
+                              }
+                            })()}
+                          </TableCell>
+                          <TableCell>
+                            {submission.essay?.word_count ? (
+                              <span className="text-sm">{submission.essay.word_count} words</span>
+                            ) : submission.essay_id ? (
+                              <span className="text-sm text-muted-foreground">Loading...</span>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {submission.teacher_score ? (
+                              <Badge variant="secondary">{submission.teacher_score}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => {
+                                // CRITICAL: Check essay_id first - if it exists, navigate to essay
+                                if (submission.essay_id) {
+                                  console.log('Navigating to essay:', submission.essay_id);
+                                  // Navigate to review assignment essay page - it handles RLS properly
+                                  navigate(`/institution/review-essay/${submission.essay_id}`);
+                                } else {
+                                  // No essay_id - check if status suggests it should exist
+                                  const hasEssayId = !!submission.essay_id;
+                                  const isSubmitted = hasEssayId || submission.status === 'submitted' || submission.status === 'reviewed';
+                                  
+                                  if (isSubmitted && !hasEssayId) {
+                                    // Status says submitted but no essay_id - data issue
+                                    toast({ 
+                                      title: 'Essay not found', 
+                                      description: 'The submission is marked as submitted but the essay link is missing. The essay may still be processing. Please refresh the page.',
+                                      variant: 'destructive' 
+                                    });
+                                  } else {
+                                    toast({ 
+                                      title: 'No essay', 
+                                      description: 'Student has not submitted an essay yet.',
+                                      variant: 'destructive' 
+                                    });
+                                  }
+                                }
+                              }}
+                              disabled={!submission.essay_id}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View Essay
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
             </div>
+          )              }
+            </DialogContent>
+          </Dialog>
+
+          {/* Grammar Submission Details Dialog */}
+          <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+            <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Grammar Assignment Submission Details</DialogTitle>
+                <DialogDescription>
+                  Review all questions and answers. You can override scores if there was a scoring error.
+                </DialogDescription>
+              </DialogHeader>
+              
+              {selectedSubmissionDetails && (
+                <div className="space-y-6 mt-4">
+                  {/* Overview Section */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Overview</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                          <div className="text-sm text-muted-foreground">Total Questions</div>
+                          <div className="text-2xl font-bold">{selectedSubmissionDetails.grammar_data?.total_questions || 0}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-muted-foreground">Correct</div>
+                          <div className="text-2xl font-bold text-green-600">
+                            {selectedSubmissionDetails.questions?.filter((q: any) => {
+                              const isCorrect = scoreOverride[q.attempt_id] !== undefined 
+                                ? scoreOverride[q.attempt_id] 
+                                : q.is_correct;
+                              return isCorrect;
+                            }).length || 0}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-muted-foreground">Incorrect</div>
+                          <div className="text-2xl font-bold text-red-600">
+                            {selectedSubmissionDetails.questions?.filter((q: any) => {
+                              const isCorrect = scoreOverride[q.attempt_id] !== undefined 
+                                ? scoreOverride[q.attempt_id] 
+                                : q.is_correct;
+                              return !isCorrect;
+                            }).length || 0}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-muted-foreground">Accuracy</div>
+                          <div className="text-2xl font-bold">
+                            {selectedSubmissionDetails.questions && selectedSubmissionDetails.questions.length > 0
+                              ? Math.round((selectedSubmissionDetails.questions.filter((q: any) => {
+                                  const isCorrect = scoreOverride[q.attempt_id] !== undefined 
+                                    ? scoreOverride[q.attempt_id] 
+                                    : q.is_correct;
+                                  return isCorrect;
+                                }).length / selectedSubmissionDetails.questions.length) * 100)
+                              : 0}%
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Exercise Set Breakdown */}
+                      {selectedSubmissionDetails.grammar_data?.exercise_set_details && (
+                        <div className="mt-4 space-y-2">
+                          <div className="text-sm font-medium">Exercise Sets:</div>
+                          {selectedSubmissionDetails.grammar_data.exercise_set_details.map((es: any) => {
+                            const questionsInSet = selectedSubmissionDetails.questions?.filter((q: any) => q.exercise_set_id === es.exercise_set_id) || [];
+                            const correctInSet = questionsInSet.filter((q: any) => {
+                              const isCorrect = scoreOverride[q.attempt_id] !== undefined 
+                                ? scoreOverride[q.attempt_id] 
+                                : q.is_correct;
+                              return isCorrect;
+                            }).length;
+                            
+                            return (
+                              <div key={es.exercise_set_id} className="text-sm">
+                                <span className="font-medium">{es.exercise_set_title}:</span>{' '}
+                                <span className={correctInSet / questionsInSet.length >= 0.7 ? 'text-green-600' : correctInSet / questionsInSet.length >= 0.5 ? 'text-yellow-600' : 'text-red-600'}>
+                                  {correctInSet}/{questionsInSet.length} correct ({Math.round((correctInSet / questionsInSet.length) * 100)}%)
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Questions List */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">All Questions</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {selectedSubmissionDetails.questions?.map((q: any, idx: number) => {
+                          const isCorrect = scoreOverride[q.attempt_id] !== undefined 
+                            ? scoreOverride[q.attempt_id] 
+                            : q.is_correct;
+                          
+                          return (
+                            <div 
+                              key={q.attempt_id} 
+                              className={`p-4 border rounded-lg ${isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge variant="outline" className="text-xs">
+                                      {q.exercise_set_title}
+                                    </Badge>
+                                    <span className="text-sm text-muted-foreground">Question {idx + 1}</span>
+                                  </div>
+                                  <div className="font-medium mb-2">{q.question}</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {isCorrect ? (
+                                    <Badge className="bg-green-500">
+                                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                                      Correct
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="destructive">
+                                      <XCircle className="h-3 w-3 mr-1" />
+                                      Incorrect
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-4 mt-3">
+                                <div>
+                                  <div className="text-xs text-muted-foreground mb-1">Student Answer:</div>
+                                  <div className="p-2 bg-background border rounded text-sm">{q.student_answer}</div>
+                                </div>
+                                <div>
+                                  <div className="text-xs text-muted-foreground mb-1">Correct Answer:</div>
+                                  <div className="p-2 bg-background border rounded text-sm">{q.correct_answer}</div>
+                                </div>
+                              </div>
+                              
+                              <div className="mt-3 flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleScoreOverride(q.attempt_id, !isCorrect)}
+                                >
+                                  {isCorrect ? 'Mark as Incorrect' : 'Mark as Correct'}
+                                </Button>
+                                <span className="text-xs text-muted-foreground">
+                                  Submitted: {new Date(q.submitted_at).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Override Confirmation Dialog - Outside the map loop */}
+          {pendingOverride && (
+            <AlertDialog open={overrideDialogOpen} onOpenChange={setOverrideDialogOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {pendingOverride.newStatus ? 'Mark as Correct' : 'Mark as Incorrect'}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="space-y-3">
+                    <div>
+                      <p className="font-medium mb-1">Student Answer:</p>
+                      <p className="text-sm bg-muted p-2 rounded">{pendingOverride.question.student_answer}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium mb-1">Current Accepted Answers:</p>
+                      <p className="text-sm bg-muted p-2 rounded">{pendingOverride.question.correct_answer}</p>
+                    </div>
+                    {pendingOverride.newStatus ? (
+                      <p>
+                        Would you like to add the student's answer as an accepted answer for this question?
+                      </p>
+                    ) : (
+                      <p>
+                        Would you like to remove this answer from the accepted answers list?
+                      </p>
+                    )}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-3 py-4">
+                  <div className="space-y-2">
+                    <Label>Update Accepted Answers:</Label>
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        type="button"
+                        variant={updateAnswerScope === 'global' ? 'default' : 'outline'}
+                        className="w-full justify-start h-auto py-3"
+                        onClick={() => setUpdateAnswerScope('global')}
+                      >
+                        <div className="flex flex-col items-start w-full">
+                          <span className="font-medium">Global - Update for all students</span>
+                          <span className="text-xs text-muted-foreground mt-1">This will update the question for all future students</span>
+                        </div>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={updateAnswerScope === 'per-student' ? 'default' : 'outline'}
+                        className="w-full justify-start h-auto py-3"
+                        onClick={() => setUpdateAnswerScope('per-student')}
+                      >
+                        <div className="flex flex-col items-start w-full">
+                          <span className="font-medium">Per-Student - Only for this student</span>
+                          <span className="text-xs text-muted-foreground mt-1">This will only affect this student's scoring</span>
+                        </div>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={updateAnswerScope === 'skip' ? 'default' : 'outline'}
+                        className="w-full justify-start h-auto py-3"
+                        onClick={() => setUpdateAnswerScope('skip')}
+                      >
+                        <div className="flex flex-col items-start w-full">
+                          <span className="font-medium">Skip - Don't update answers</span>
+                          <span className="text-xs text-muted-foreground mt-1">Only the score will be updated, not the accepted answers</span>
+                        </div>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel onClick={() => {
+                    setOverrideDialogOpen(false);
+                    setPendingOverride(null);
+                    setUpdateAnswerScope('skip');
+                  }}>
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={async () => {
+                      if (pendingOverride) {
+                        await performScoreOverride(
+                          pendingOverride.attemptId,
+                          pendingOverride.newStatus,
+                          pendingOverride.question,
+                          updateAnswerScope
+                        );
+                        setOverrideDialogOpen(false);
+                        setPendingOverride(null);
+                        setUpdateAnswerScope('skip');
+                      }
+                    }}
+                  >
+                    Confirm Override
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }

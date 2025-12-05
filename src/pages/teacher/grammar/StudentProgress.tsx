@@ -413,63 +413,96 @@ export default function StudentProgress() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Question</TableHead>
-                        <TableHead>Student Answer</TableHead>
-                        <TableHead>Correct Answer</TableHead>
-                        <TableHead>Result</TableHead>
-                        <TableHead>Type</TableHead>
+                        <TableHead>Exercise Set</TableHead>
+                        <TableHead>Assignment</TableHead>
+                        <TableHead>Score</TableHead>
+                        <TableHead>Accuracy</TableHead>
+                        <TableHead>Questions</TableHead>
                         <TableHead>Date</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {studentAttempts.map((attempt) => (
-                        <TableRow key={attempt.id}>
-                          <TableCell className="max-w-[300px]">
-                            <div className="truncate" title={attempt.question}>
-                              {attempt.question}
-                            </div>
-                            {attempt.assignment_title && (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                {attempt.assignment_title}
+                      {studentAttempts.map((exerciseSet: any, idx: number) => (
+                        <TableRow key={exerciseSet.exercise_set_id || idx}>
+                          <TableCell className="max-w-[200px]">
+                            <div className="font-medium">{exerciseSet.exercise_set_title}</div>
+                          </TableCell>
+                          <TableCell>
+                            {exerciseSet.assignment_title ? (
+                              <div>
+                                <Badge variant="outline" className="text-xs">
+                                  {exerciseSet.assignment_type === 'daily' ? 'Daily' :
+                                   exerciseSet.assignment_type === 'manual' ? 'Assignment' :
+                                   'Self Practice'}
+                                </Badge>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {exerciseSet.assignment_title}
+                                </div>
                               </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="max-w-[200px] truncate" title={attempt.user_answer}>
-                              {attempt.user_answer}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="max-w-[200px] truncate" title={attempt.correct_answer}>
-                              {attempt.correct_answer}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {attempt.is_correct ? (
-                              <Badge variant="default" className="bg-green-500">
-                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                Correct
-                              </Badge>
                             ) : (
-                              <Badge variant="destructive">
-                                <XCircle className="h-3 w-3 mr-1" />
-                                Incorrect
+                              <Badge variant="outline" className="text-xs">
+                                {exerciseSet.assignment_type === 'daily' ? 'Daily' :
+                                 exerciseSet.assignment_type === 'manual' ? 'Assignment' :
+                                 'Self Practice'}
                               </Badge>
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline">
-                              {attempt.assignment_type === 'daily' ? 'Daily' :
-                               attempt.assignment_type === 'manual' ? 'Assignment' :
-                               'Self Practice'}
+                            <Badge variant="secondary">
+                              {exerciseSet.correct_questions} / {exerciseSet.total_questions}
                             </Badge>
                           </TableCell>
+                          <TableCell>
+                            <Badge variant={exerciseSet.accuracy >= 70 ? "default" : exerciseSet.accuracy >= 50 ? "secondary" : "destructive"}>
+                              {exerciseSet.accuracy}%
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm">{exerciseSet.total_questions} questions</span>
+                          </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            {new Date(attempt.submitted_at).toLocaleDateString()}
+                            {new Date(exerciseSet.last_attempt_date).toLocaleDateString()}
                             <br />
                             <span className="text-xs">
-                              {new Date(attempt.submitted_at).toLocaleTimeString()}
+                              {new Date(exerciseSet.last_attempt_date).toLocaleTimeString()}
                             </span>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                // Show questions in a dialog or expandable section
+                                const questionsText = exerciseSet.questions.map((q: any, qIdx: number) => 
+                                  `${qIdx + 1}. ${q.question}\n   Student: ${q.user_answer}\n   Correct: ${q.correct_answer}\n   ${q.is_correct ? '✓ Correct' : '✗ Incorrect'}\n`
+                                ).join('\n');
+                                
+                                toast({
+                                  title: `${exerciseSet.exercise_set_title} - Questions`,
+                                  description: (
+                                    <div className="space-y-2 mt-2 max-h-[400px] overflow-y-auto">
+                                      {exerciseSet.questions.map((q: any, qIdx: number) => (
+                                        <div key={qIdx} className="p-2 border rounded text-sm">
+                                          <div className="font-medium mb-1">Q{qIdx + 1}: {q.question}</div>
+                                          <div className="text-muted-foreground">
+                                            <div>Student: {q.user_answer}</div>
+                                            <div>Correct: {q.correct_answer}</div>
+                                            <div className={q.is_correct ? "text-green-600" : "text-red-600"}>
+                                              {q.is_correct ? '✓ Correct' : '✗ Incorrect'}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ),
+                                  duration: 15000
+                                });
+                              }}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View Questions
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}

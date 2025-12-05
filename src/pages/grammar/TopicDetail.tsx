@@ -4,14 +4,17 @@ import { PageLayout } from "@/components/layout/PageLayout";
 import { TopBar } from "@/components/layout/TopBar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ExerciseRunner } from "@/components/grammar/ExerciseRunner";
-import { Loader2, ArrowLeft, Play } from "lucide-react";
+import { Loader2, ArrowLeft, Play, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { PredefinedTopic, GrammarTopic, GrammarExerciseSourceType } from "@/types/grammar";
 
 export default function TopicDetail() {
   const { topicId, type } = useParams<{ topicId: string; type: 'predefined' | 'institute' }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [topic, setTopic] = useState<PredefinedTopic | GrammarTopic | null>(null);
   const [exerciseSets, setExerciseSets] = useState<any[]>([]);
@@ -82,7 +85,7 @@ export default function TopicDetail() {
           if (exerciseSetsError) {
             console.error("Error loading exercise sets:", exerciseSetsError);
           } else if (exerciseSetsData && exerciseSetsData.length > 0) {
-            // Load question counts for each exercise set
+            // Load question counts and completion status for each exercise set
             const exerciseSetsWithCounts = await Promise.all(
               exerciseSetsData.map(async (exerciseSet) => {
                 const { count } = await supabase
@@ -90,14 +93,36 @@ export default function TopicDetail() {
                   .select('*', { count: 'exact', head: true })
                   .eq('exercise_set_id', exerciseSet.id);
                 
+                // Check if student has completed this exercise set
+                let isCompleted = false;
+                if (user) {
+                  const { data: completion } = await supabase
+                    .from('grammar_exercise_completions')
+                    .select('id')
+                    .eq('student_id', user.id)
+                    .eq('exercise_set_id', exerciseSet.id)
+                    .maybeSingle();
+                  
+                  isCompleted = !!completion;
+                }
+                
                 return {
                   ...exerciseSet,
-                  question_count: count || 0
+                  question_count: count || 0,
+                  is_completed: isCompleted
                 };
               })
             );
             
             setExerciseSets(exerciseSetsWithCounts);
+            
+            // Update completed sets
+            const completedIds = new Set(
+              exerciseSetsWithCounts
+                .filter(es => es.is_completed)
+                .map(es => es.id)
+            );
+            setCompletedExerciseSets(completedIds);
           } else {
             setExerciseSets([]);
           }
@@ -144,9 +169,7 @@ export default function TopicDetail() {
   };
 
   const handleComplete = async (results: Array<{ exerciseId: string; isCorrect: boolean; userAnswer: string }>) => {
-    // Save attempts
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user || !selectedExerciseSet) return;
 
     try {
       const exerciseSourceType: GrammarExerciseSourceType = type === 'predefined' ? 'predefined' : 'custom';
@@ -156,7 +179,7 @@ export default function TopicDetail() {
         assignment_type: 'self_practice' as const,
         assignment_id: null,
         exercise_id: result.exerciseId,
-        exercise_set_id: selectedExerciseSet?.id || null,
+        exercise_set_id: selectedExerciseSet.id,
         question_id: result.exerciseId,
         exercise_source_type: exerciseSourceType,
         user_answer: result.userAnswer,
@@ -164,16 +187,54 @@ export default function TopicDetail() {
         score: result.isCorrect ? 1.0 : 0.0
       }));
 
-      const { error } = await supabase
+      const { error: attemptsError } = await supabase
         .from('grammar_attempts')
         .insert(attempts);
 
-      if (error) throw error;
+      if (attemptsError) throw attemptsError;
+
+      // Create or update completion record
+      const totalQuestions = results.length;
+      const correctAnswers = results.filter(r => r.isCorrect).length;
+      const incorrectAnswers = totalQuestions - correctAnswers;
+      const score = correctAnswers;
+
+      const { error: completionError } = await supabase
+        .from('grammar_exercise_completions')
+        .upsert({
+          student_id: user.id,
+          exercise_set_id: selectedExerciseSet.id,
+          assignment_type: 'self_practice',
+          assignment_id: null,
+          total_questions: totalQuestions,
+          correct_answers: correctAnswers,
+          incorrect_answers: incorrectAnswers,
+          score: score
+        }, {
+          onConflict: 'student_id,exercise_set_id,assignment_type,assignment_id'
+        });
+
+      if (completionError) {
+        console.error("Error saving completion:", completionError);
+      } else {
+        // Update completed sets
+        setCompletedExerciseSets(prev => new Set([...prev, selectedExerciseSet.id]));
+        
+        // Update exercise set in list
+        setExerciseSets(prev => prev.map(es => 
+          es.id === selectedExerciseSet.id 
+            ? { ...es, is_completed: true }
+            : es
+        ));
+      }
 
       setShowPractice(false);
       setSelectedExerciseSet(null);
       setExercises([]);
-      // Show completion message or navigate back
+      // Reload topic to refresh completion status
+      if (topicId && type) {
+        loadTopicAndExercises();
+      }
     } catch (error) {
       console.error("Error saving attempts:", error);
     }
@@ -257,7 +318,15 @@ export default function TopicDetail() {
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between">
                             <div className="flex-1">
-                              <h3 className="font-semibold text-lg">{exerciseSet.title}</h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-semibold text-lg">{exerciseSet.title}</h3>
+                                {exerciseSet.is_completed && (
+                                  <Badge variant="default" className="bg-green-500">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    Completed
+                                  </Badge>
+                                )}
+                              </div>
                               {exerciseSet.description && (
                                 <p className="text-sm text-muted-foreground mt-1">{exerciseSet.description}</p>
                               )}
@@ -275,9 +344,10 @@ export default function TopicDetail() {
                                 handleExerciseSetSelect(exerciseSet);
                               }}
                               size="lg"
+                              variant={exerciseSet.is_completed ? "outline" : "default"}
                             >
                               <Play className="h-4 w-4 mr-2" />
-                              Start Practice
+                              {exerciseSet.is_completed ? "Practice Again" : "Start Practice"}
                             </Button>
                           </div>
                         </CardContent>

@@ -31,7 +31,19 @@ export default function PromptGenerator() {
 
     const questionTypeInstructions = {
       "fill-blank": `Create fill-in-the-blank questions where students need to complete sentences with the correct word or phrase. Each question must be a COMPLETE SENTENCE.`,
-      "mcq": `Create multiple-choice questions (MCQs) with 4 options (A, B, C, D) where only one answer is correct. Each question must be a COMPLETE SENTENCE.`,
+      "mcq": `Create multiple-choice questions (MCQs) with 4 options (A, B, C, D). 
+      
+CRITICAL FOR MCQs:
+- Each MCQ must have EXACTLY 4 options (A, B, C, D)
+- Only ONE option should be correct (unless multiple correct answers are grammatically acceptable)
+- For transformations like active/passive voice or direct/indirect speech: Include ALL possible correct variations as separate options if they are grammatically valid
+- For example, if converting "He said, 'I am happy'" to indirect speech, options could include:
+  * A) He said that he was happy
+  * B) He said that he is happy (also acceptable in some contexts)
+  * C) He said he was happy (without 'that' - also correct)
+  * D) He said that he will be happy (incorrect)
+- Make sure incorrect options are plausible but clearly wrong
+- Each question must be a COMPLETE SENTENCE`,
       "rewrite": `Create sentence rewriting exercises where students must rewrite a given sentence in a different form (e.g., active to passive, direct to indirect speech, changing tenses). Provide the original sentence and the expected rewritten version.`,
       "both": `Create a mix of fill-in-the-blank questions, multiple-choice questions (MCQs) with 4 options each, and sentence rewriting exercises. Each question must be a COMPLETE SENTENCE.`
     }[questionType];
@@ -39,6 +51,15 @@ export default function PromptGenerator() {
     const formatInstructions = questionType === "mcq" 
       ? `CRITICAL: Each exercise must be on a SINGLE LINE with this EXACT format:
 "Question text [A) option1 B) option2 C) option3 D) option4] -> Answer Letter) Answer Text"
+
+IMPORTANT FOR MCQs:
+- Include ALL possible correct answer variations in the answer field if multiple are acceptable
+- For active/passive voice: Include all grammatically correct passive forms separated by |
+- For direct/indirect speech: Include all acceptable indirect forms (with/without 'that', tense variations if acceptable)
+- Example: "B) will be announced|B) is announced" if both are correct in context
+- Format: "Letter) Answer Text" or "Letter) Answer Text|Letter) Alternative Answer" for multiple correct options
+- Each option (A, B, C, D) must be a complete, grammatically correct phrase or sentence
+- Make incorrect options plausible but clearly wrong
 
 NO numbering, NO emojis, NO line breaks, NO extra text. Just the question, options in brackets, arrow, and answer.`
       : questionType === "fill-blank"
@@ -60,8 +81,18 @@ Rewrite format: "Original sentence -> Rewritten sentence"
 NO numbering, NO emojis, NO line breaks, NO extra text. Each exercise is exactly one line.`;
 
     const examples = questionType === "mcq" 
-      ? `Example (EXACT format to follow - MUST include hint in parentheses):
-The committee will announce the decision tomorrow. Convert to passive: The decision ___ tomorrow by the committee. (Passive voice expected) [A) will announce B) will be announced C) is announced D) announces] -> B) will be announced`
+      ? `Examples (EXACT format to follow - MUST include hint and ALL possible correct answers):
+
+Example 1 - Simple MCQ:
+The committee will announce the decision tomorrow. Convert to passive: The decision ___ tomorrow by the committee. (Passive voice expected) [A) will announce B) will be announced C) is announced D) announces] -> B) will be announced
+
+Example 2 - MCQ with multiple correct answers (active/passive):
+He said, "I am studying." Convert to indirect speech: (Reported speech) [A) He said that he is studying B) He said that he was studying C) He said he was studying D) He said I am studying] -> B) He said that he was studying|C) He said he was studying
+
+Example 3 - MCQ for direct/indirect speech with variations:
+She said, "I will come tomorrow." Convert to indirect speech: (Reported speech) [A) She said that she will come tomorrow B) She said that she would come tomorrow C) She said she will come tomorrow D) She said I will come tomorrow] -> B) She said that she would come tomorrow|C) She said she would come tomorrow
+
+Note: When multiple answer variations are grammatically correct (like with/without 'that', different tense forms if acceptable), include them ALL separated by | in the answer field.`
       : questionType === "fill-blank"
       ? `Example (EXACT format to follow - MUST include hint and multiple answers if applicable):
 The committee will announce the decision tomorrow. Convert to passive: The decision ___ tomorrow by the committee. (Passive voice expected) -> will be announced
@@ -104,7 +135,10 @@ REQUIREMENTS:
 - Questions should be clear, practical, and test real grammar understanding
 - Each question must be a COMPLETE SENTENCE - not fragments or incomplete thoughts
 - For fill-in-the-blank: Use clear context clues in the question itself. Include hints when testing specific grammar points (e.g., "Passive voice expected", "Past perfect required", "Modal verb needed")
-- For MCQs: Provide 4 plausible options with only one correct answer. Each option must be grammatically complete. Include hints in the question when testing specific grammar points
+- For MCQs: Provide 4 plausible options. Include ALL possible correct answer variations if multiple are grammatically acceptable (e.g., active/passive voice, direct/indirect speech with/without 'that'). Each option must be grammatically complete. Include hints in the question when testing specific grammar points. For transformations like active/passive or direct/indirect speech, consider ALL valid variations:
+  * Active/Passive: Different passive forms that are grammatically correct
+  * Direct/Indirect: With or without 'that', acceptable tense variations
+  * Include these variations as separate options if they are valid, or list them in the answer field separated by |
 - For sentence rewriting: Provide complete original sentences and complete rewritten versions. Include hints about what transformation is needed (e.g., "Convert to passive", "Change to indirect speech", "Use past perfect")
 - ALWAYS include helpful hints in parentheses or as part of the question when testing specific grammar concepts:
   * For tenses: "(Past perfect expected)", "(Future continuous required)", "(Present perfect needed)"
@@ -127,11 +161,15 @@ REQUIREMENTS:
 - Mix different aspects of the topic (if applicable)
 - Ensure all sentences are complete and make sense as standalone statements
 - Make questions educational - students should learn from the context and hints
-- MULTIPLE CORRECT ANSWERS: When there are multiple grammatically correct ways to answer (contractions vs full forms, different word orders, etc.), provide ALL acceptable variations separated by pipe "|". Examples:
-  * Contractions: "do not|don't", "cannot|can't", "I am|I'm", "will not|won't"
+- MULTIPLE CORRECT ANSWERS: When there are multiple grammatically correct ways to answer, provide ALL acceptable variations separated by pipe "|". This is CRITICAL for:
+  * Contractions vs full forms: "do not|don't", "cannot|can't", "I am|I'm", "will not|won't"
+  * Active/Passive voice transformations: Include all valid passive forms
+  * Direct/Indirect speech: Include variations with/without 'that', acceptable tense changes
   * Word order variations: "have been waiting|been waiting have" (if both are acceptable)
   * Different phrasings: "should not|shouldn't", "would not|wouldn't"
+  * For MCQs: If multiple options are correct, list them in answer format: "B) answer1|C) answer2" or just list all correct options
   * Include common variations that native speakers use interchangeably
+  * For sentence transformations (active/passive, direct/indirect), consider ALL grammatically valid variations
 
 OUTPUT FORMAT:
 ${formatInstructions}

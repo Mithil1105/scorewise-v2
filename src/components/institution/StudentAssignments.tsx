@@ -45,6 +45,7 @@ export function StudentAssignments() {
   const { activeMembership, activeInstitution } = useInstitution();
   const [assignments, setAssignments] = useState<Array<Assignment | { isGroup: true; groupId: string; groupName: string; totalTimeMinutes: number; assignments: Assignment[] }>>([]);
   const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     if (activeInstitution && activeMembership) {
@@ -272,14 +273,14 @@ export function StudentAssignments() {
         finalAssignments.push(assignment);
       });
 
-      // Sort by due date
+      // Sort by created_at (newest first) by default
       finalAssignments.sort((a, b) => {
-        const aDate = 'isGroup' in a ? (a.assignments[0]?.due_date || '') : (a.due_date || '');
-        const bDate = 'isGroup' in b ? (b.assignments[0]?.due_date || '') : (b.due_date || '');
+        const aDate = 'isGroup' in a ? (a.assignments[0]?.created_at || '') : (a.created_at || '');
+        const bDate = 'isGroup' in b ? (b.assignments[0]?.created_at || '') : (b.created_at || '');
         if (!aDate && !bDate) return 0;
         if (!aDate) return 1;
         if (!bDate) return -1;
-        return new Date(aDate).getTime() - new Date(bDate).getTime();
+        return new Date(bDate).getTime() - new Date(aDate).getTime(); // Descending (newest first)
       });
 
       setAssignments(finalAssignments as any);
@@ -381,7 +382,22 @@ export function StudentAssignments() {
           </div>
         ) : (
           <div className="space-y-4">
-            {assignments.map((item, index) => {
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm text-muted-foreground">
+                Showing {showAll ? assignments.length : Math.min(5, assignments.length)} of {assignments.length} assignments
+              </p>
+              {assignments.length > 5 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAll(!showAll)}
+                >
+                  {showAll ? 'Show Less' : 'Show All'}
+                </Button>
+              )}
+            </div>
+            <div className={showAll ? "space-y-4" : "space-y-4 max-h-[600px] overflow-y-auto"}>
+              {(showAll ? assignments : assignments.slice(0, 5)).map((item, index) => {
               // Handle grouped assignments
               if ('isGroup' in item && item.isGroup) {
                 const groupAssignments = item.assignments;
@@ -565,6 +581,7 @@ export function StudentAssignments() {
                 </div>
               );
             })}
+            </div>
           </div>
         )}
       </CardContent>
