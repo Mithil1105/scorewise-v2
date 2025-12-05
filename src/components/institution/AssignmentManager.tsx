@@ -42,7 +42,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { 
   Plus, Loader2, ClipboardList, Calendar, Users, 
   FileText, MoreHorizontal, Eye, Trash2, Clock, 
-  BookOpen, GraduationCap, Sparkles, Info, Image as ImageIcon, X, Search, Check, CheckCircle2, CheckSquare, XCircle
+  BookOpen, GraduationCap, Sparkles, Info, Image as ImageIcon, X, Search, Check, CheckCircle2, CheckSquare, XCircle, UserPlus, UserMinus
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -145,6 +145,11 @@ export function AssignmentManager() {
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
   const [pendingOverride, setPendingOverride] = useState<{ attemptId: string; newStatus: boolean; question: any } | null>(null);
   const [updateAnswerScope, setUpdateAnswerScope] = useState<'global' | 'per-student' | 'skip'>('skip');
+  const [manageStudentsOpen, setManageStudentsOpen] = useState(false);
+  const [selectedAssignmentForStudents, setSelectedAssignmentForStudents] = useState<{ id: string; type: 'regular' | 'grammar'; title: string } | null>(null);
+  const [currentAssignedStudents, setCurrentAssignedStudents] = useState<string[]>([]); // member_ids for regular, user_ids for grammar
+  const [selectedStudentsToAdd, setSelectedStudentsToAdd] = useState<string[]>([]);
+  const [studentSearchForManage, setStudentSearchForManage] = useState('');
 
   const [newAssignment, setNewAssignment] = useState({
     title: '',
@@ -421,15 +426,39 @@ export function AssignmentManager() {
         });
       }
 
-      // Filter out invalid assignments and enrich with submission counts
+      // Fetch assignment_students for regular assignments to check if specific students are assigned
+      const { data: assignmentStudentsData } = await supabase
+        .from('assignment_students')
+        .select('assignment_id, member_id')
+        .in('assignment_id', regularAssignmentIds);
+
+      const assignmentStudentsMap = new Map<string, string[]>();
+      assignmentStudentsData?.forEach(as => {
+        if (!assignmentStudentsMap.has(as.assignment_id)) {
+          assignmentStudentsMap.set(as.assignment_id, []);
+        }
+        assignmentStudentsMap.get(as.assignment_id)!.push(as.member_id);
+      });
+
+      // Filter out invalid assignments and enrich with submission counts and student assignment info
       const enrichedAssignments = allAssignments
         .filter(a => a && a.id && a.title) // Only include valid assignments (grammar assignments have topic set)
-        .map(a => ({
-          ...a,
-          submissionCount: a.exam_type === 'GRAMMAR' 
-            ? (grammarCountMap.get(a.id) || 0)
-            : (countMap.get(a.id) || 0)
-        }));
+        .map(a => {
+          const hasSpecificStudents = a.exam_type === 'GRAMMAR' 
+            ? (grammarAssignments?.find(ga => ga.id === a.id)?.student_ids?.length || 0) > 0
+            : (assignmentStudentsMap.get(a.id)?.length || 0) > 0;
+          
+          return {
+            ...a,
+            submissionCount: a.exam_type === 'GRAMMAR' 
+              ? (grammarCountMap.get(a.id) || 0)
+              : (countMap.get(a.id) || 0),
+            hasSpecificStudents,
+            specificStudentCount: a.exam_type === 'GRAMMAR'
+              ? (grammarAssignments?.find(ga => ga.id === a.id)?.student_ids?.length || 0)
+              : (assignmentStudentsMap.get(a.id)?.length || 0)
+          };
+        });
 
       // Sort by created_at descending
       enrichedAssignments.sort((a, b) => 
@@ -1702,6 +1731,281 @@ export function AssignmentManager() {
     }
   };
 
+  const handleManageStudents = async (assignmentId: string, type: 'regular' | 'grammar', title: string) => {
+    setSelectedAssignmentForStudents({ id: assignmentId, type, title });
+    setSelectedStudentsToAdd([]);
+    setStudentSearchForManage('');
+    
+    try {
+      if (type === 'regular') {
+        // Fetch assignment to check batch_id
+        const { data: assignmentData, error: assignmentError } = await supabase
+          .from('assignments')
+          .select('batch_id')
+          .eq('id', assignmentId)
+          .single();
+        
+        if (assignmentError) throw assignmentError;
+        
+        // Fetch currently assigned students from assignment_students table
+        const { data: assignedData, error } = await supabase
+          .from('assignment_students')
+          .select('member_id')
+          .eq('assignment_id', assignmentId);
+        
+        if (error) throw error;
+        
+        const memberIds = (assignedData || []).map(a => a.member_id);
+        
+        // If no batch_id and no specific students, it's "All students" - show all students as assigned
+        if (!assignmentData.batch_id && memberIds.length === 0) {
+          // "All students" - set all student member_ids
+          const allMemberIds = students.map(s => s.id);
+          setCurrentAssignedStudents(allMemberIds);
+        } else {
+          setCurrentAssignedStudents(memberIds);
+        }
+      } else {
+        // Fetch grammar assignment to get current student_ids and batch_ids
+        const { data: grammarAssignment, error } = await supabase
+          .from('grammar_manual_assignments')
+          .select('student_ids, batch_ids')
+          .eq('id', assignmentId)
+          .single();
+        
+        if (error) throw error;
+        
+        // Convert user_ids to member_ids for display consistency
+        const userIds = grammarAssignment?.student_ids || [];
+        const batchIds = grammarAssignment?.batch_ids || [];
+        
+        // If no batch_ids and no specific students, it's "All students" - show all students as assigned
+        if (batchIds.length === 0 && userIds.length === 0) {
+          // "All students" - set all student member_ids
+          const allMemberIds = students.map(s => s.id);
+          setCurrentAssignedStudents(allMemberIds);
+        } else if (userIds.length > 0) {
+          const { data: membersData } = await supabase
+            .from('institution_members')
+            .select('id, user_id')
+            .eq('institution_id', activeInstitution?.id)
+            .in('user_id', userIds);
+          
+          const memberIds = (membersData || []).map(m => m.id);
+          setCurrentAssignedStudents(memberIds);
+        } else {
+          setCurrentAssignedStudents([]);
+        }
+      }
+      
+      setManageStudentsOpen(true);
+    } catch (error: any) {
+      console.error('Error loading current students:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load current students',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleAddStudentsToAssignment = async () => {
+    if (!selectedAssignmentForStudents || selectedStudentsToAdd.length === 0) {
+      toast({
+        title: 'No students selected',
+        description: 'Please select at least one student to add',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      if (selectedAssignmentForStudents.type === 'regular') {
+        // For regular assignments: add to assignment_students table
+        const newAssignments = selectedStudentsToAdd
+          .filter(memberId => !currentAssignedStudents.includes(memberId))
+          .map(memberId => ({
+            assignment_id: selectedAssignmentForStudents.id,
+            member_id: memberId
+          }));
+
+        if (newAssignments.length > 0) {
+          const { error } = await supabase
+            .from('assignment_students')
+            .insert(newAssignments);
+
+          if (error) throw error;
+        }
+
+        toast({
+          title: 'Students Added',
+          description: `${newAssignments.length} student(s) added to the assignment. They will see it in their assignments list.`
+        });
+      } else {
+        // For grammar assignments: merge into student_ids array
+        const { data: currentAssignment, error: fetchError } = await supabase
+          .from('grammar_manual_assignments')
+          .select('student_ids')
+          .eq('id', selectedAssignmentForStudents.id)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        // Get user_ids for selected member_ids
+        const selectedMemberIds = selectedStudentsToAdd.filter(id => !currentAssignedStudents.includes(id));
+        const { data: membersData } = await supabase
+          .from('institution_members')
+          .select('user_id')
+          .in('id', selectedMemberIds);
+
+        const newUserIds = (membersData || []).map(m => m.user_id);
+        const existingUserIds = currentAssignment?.student_ids || [];
+        
+        // Merge and remove duplicates
+        const updatedUserIds = [...new Set([...existingUserIds, ...newUserIds])];
+
+        const { error: updateError } = await supabase
+          .from('grammar_manual_assignments')
+          .update({ student_ids: updatedUserIds })
+          .eq('id', selectedAssignmentForStudents.id);
+
+        if (updateError) throw updateError;
+
+        toast({
+          title: 'Students Added',
+          description: `${newUserIds.length} student(s) added to the assignment. They will see it in their assignments list.`
+        });
+      }
+
+      setManageStudentsOpen(false);
+      setSelectedAssignmentForStudents(null);
+      setSelectedStudentsToAdd([]);
+      setCurrentAssignedStudents([]);
+      fetchAssignments(); // Refresh assignments list
+    } catch (error: any) {
+      console.error('Error adding students:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to add students to assignment',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleRemoveStudentFromAssignment = async (memberId: string) => {
+    if (!selectedAssignmentForStudents) return;
+
+    try {
+      if (selectedAssignmentForStudents.type === 'regular') {
+        // Check if this is "All students" scenario (no batch_id, no entries in assignment_students)
+        const { data: assignmentData } = await supabase
+          .from('assignments')
+          .select('batch_id')
+          .eq('id', selectedAssignmentForStudents.id)
+          .single();
+
+        const { data: existingAssignments } = await supabase
+          .from('assignment_students')
+          .select('member_id')
+          .eq('assignment_id', selectedAssignmentForStudents.id);
+
+        // If it's "All students" (no batch_id, no specific students), we need to add all OTHER students as specific
+        if (!assignmentData?.batch_id && (!existingAssignments || existingAssignments.length === 0)) {
+          // This is "All students" - we need to convert it to specific students (all except the one being removed)
+          const allOtherStudents = students
+            .filter(s => s.id !== memberId)
+            .map(s => ({
+              assignment_id: selectedAssignmentForStudents.id,
+              member_id: s.id
+            }));
+
+          if (allOtherStudents.length > 0) {
+            const { error } = await supabase
+              .from('assignment_students')
+              .insert(allOtherStudents);
+
+            if (error) throw error;
+          }
+        } else {
+          // Remove from assignment_students table
+          const { error } = await supabase
+            .from('assignment_students')
+            .delete()
+            .eq('assignment_id', selectedAssignmentForStudents.id)
+            .eq('member_id', memberId);
+
+          if (error) throw error;
+        }
+
+        // Update local state
+        setCurrentAssignedStudents(prev => prev.filter(id => id !== memberId));
+      } else {
+        // Remove from grammar assignment student_ids array
+        const { data: currentAssignment, error: fetchError } = await supabase
+          .from('grammar_manual_assignments')
+          .select('student_ids, batch_ids')
+          .eq('id', selectedAssignmentForStudents.id)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        // Get user_id for this member_id
+        const { data: memberData } = await supabase
+          .from('institution_members')
+          .select('user_id')
+          .eq('id', memberId)
+          .single();
+
+        if (!memberData) throw new Error('Member not found');
+
+        const existingUserIds = currentAssignment?.student_ids || [];
+        const batchIds = currentAssignment?.batch_ids || [];
+
+        // If it's "All students" (no batch_ids, no specific students), convert to specific (all except removed)
+        if (batchIds.length === 0 && existingUserIds.length === 0) {
+          const allOtherUserIds = students
+            .filter(s => s.id !== memberId)
+            .map(s => s.user_id)
+            .filter(Boolean) as string[];
+
+          const { error: updateError } = await supabase
+            .from('grammar_manual_assignments')
+            .update({ student_ids: allOtherUserIds.length > 0 ? allOtherUserIds : null })
+            .eq('id', selectedAssignmentForStudents.id);
+
+          if (updateError) throw updateError;
+        } else {
+          const updatedUserIds = existingUserIds.filter(id => id !== memberData.user_id);
+
+          const { error: updateError } = await supabase
+            .from('grammar_manual_assignments')
+            .update({ student_ids: updatedUserIds.length > 0 ? updatedUserIds : null })
+            .eq('id', selectedAssignmentForStudents.id);
+
+          if (updateError) throw updateError;
+        }
+
+        // Update local state
+        setCurrentAssignedStudents(prev => prev.filter(id => id !== memberId));
+      }
+
+      toast({
+        title: 'Student Removed',
+        description: 'Student has been removed from the assignment.'
+      });
+
+      // Refresh to update the list
+      await handleManageStudents(selectedAssignmentForStudents.id, selectedAssignmentForStudents.type, selectedAssignmentForStudents.title);
+    } catch (error: any) {
+      console.error('Error removing student:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to remove student from assignment',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const recalculateSubmissionScore = async (submission: any, overrideState: { [key: string]: boolean }) => {
     try {
       // Recalculate completion records based on updated attempts
@@ -2494,7 +2798,13 @@ export function AssignmentManager() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            {assignment.batch?.name || (
+                            {assignment.batch?.name ? (
+                              <span>{assignment.batch.name}</span>
+                            ) : (assignment as any).hasSpecificStudents ? (
+                              <span className="text-muted-foreground">
+                                {(assignment as any).specificStudentCount || 0} student{(assignment as any).specificStudentCount !== 1 ? 's' : ''}
+                              </span>
+                            ) : (
                               <span className="text-muted-foreground">All students</span>
                             )}
                           </TableCell>
@@ -2549,6 +2859,18 @@ export function AssignmentManager() {
                               >
                                 <Eye className="h-4 w-4 mr-1" />
                                 View Submissions
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleManageStudents(
+                                  assignment.id, 
+                                  assignment.exam_type === 'GRAMMAR' ? 'grammar' : 'regular',
+                                  assignment.title
+                                )}
+                              >
+                                <UserPlus className="h-4 w-4 mr-1" />
+                                Add Students
                               </Button>
                               <Button 
                                 variant="ghost" 
@@ -2609,11 +2931,22 @@ export function AssignmentManager() {
                             <BookOpen className="h-3 w-3" /> IELTS T2
                           </span>
                         )}
-                        {!['GRE', 'IELTS_T1', 'IELTS_T2'].includes(assignment.exam_type) && assignment.exam_type}
+                        {assignment.exam_type === 'GRAMMAR' && (
+                          <span className="flex items-center gap-1">
+                            <CheckSquare className="h-3 w-3" /> Grammar
+                          </span>
+                        )}
+                        {!['GRE', 'IELTS_T1', 'IELTS_T2', 'GRAMMAR'].includes(assignment.exam_type) && assignment.exam_type}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {assignment.batch?.name || (
+                      {assignment.batch?.name ? (
+                        <span>{assignment.batch.name}</span>
+                      ) : (assignment as any).hasSpecificStudents ? (
+                        <span className="text-muted-foreground">
+                          {(assignment as any).specificStudentCount || 0} student{(assignment as any).specificStudentCount !== 1 ? 's' : ''}
+                        </span>
+                      ) : (
                         <span className="text-muted-foreground">All students</span>
                       )}
                     </TableCell>
@@ -2668,6 +3001,18 @@ export function AssignmentManager() {
                         >
                           <Eye className="h-4 w-4 mr-1" />
                           View Submissions
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleManageStudents(
+                            assignment.id, 
+                            assignment.exam_type === 'GRAMMAR' ? 'grammar' : 'regular',
+                            assignment.title
+                          )}
+                        >
+                          <UserPlus className="h-4 w-4 mr-1" />
+                          Add Students
                         </Button>
                         <Button 
                           variant="ghost" 
@@ -2977,7 +3322,7 @@ export function AssignmentManager() {
                 );
               })()}
             </div>
-          )              }
+          )}
             </DialogContent>
           </Dialog>
 
@@ -3241,6 +3586,142 @@ export function AssignmentManager() {
               </AlertDialogContent>
             </AlertDialog>
           )}
+
+          {/* Manage Students Dialog */}
+          <Dialog open={manageStudentsOpen} onOpenChange={setManageStudentsOpen}>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Manage Students - {selectedAssignmentForStudents?.title}</DialogTitle>
+                <DialogDescription>
+                  Add or remove students from this assignment. Newly added students will see the assignment in their list.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                {/* Currently Assigned Students */}
+                {currentAssignedStudents.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Currently Assigned Students ({currentAssignedStudents.length})</Label>
+                    <div className="border rounded-lg p-3 max-h-40 overflow-y-auto space-y-2">
+                      {students
+                        .filter(s => currentAssignedStudents.includes(s.id))
+                        .map(student => (
+                          <div key={student.id} className="flex items-center justify-between p-2 bg-muted rounded">
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-8 w-8">
+                                <AvatarImage src={student.profile?.avatar_url || undefined} />
+                                <AvatarFallback>
+                                  {student.profile?.display_name?.charAt(0) || 'S'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="font-medium">
+                                {student.profile?.display_name || 'Student'}
+                              </span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveStudentFromAssignment(student.id)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <UserMinus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Add New Students */}
+                <div className="space-y-2">
+                  <Label>Add Students</Label>
+                  <Input
+                    placeholder="Search students..."
+                    value={studentSearchForManage}
+                    onChange={(e) => setStudentSearchForManage(e.target.value)}
+                    className="w-full"
+                  />
+                  <div className="border rounded-lg p-3 max-h-60 overflow-y-auto space-y-2">
+                    {students
+                      .filter(s => {
+                        const searchLower = studentSearchForManage.toLowerCase();
+                        const name = s.profile?.display_name?.toLowerCase() || '';
+                        return name.includes(searchLower) && !currentAssignedStudents.includes(s.id);
+                      })
+                      .map(student => (
+                        <div
+                          key={student.id}
+                          className={`flex items-center justify-between p-2 rounded cursor-pointer hover:bg-muted ${
+                            selectedStudentsToAdd.includes(student.id) ? 'bg-primary/10 border border-primary' : ''
+                          }`}
+                          onClick={() => {
+                            if (selectedStudentsToAdd.includes(student.id)) {
+                              setSelectedStudentsToAdd(prev => prev.filter(id => id !== student.id));
+                            } else {
+                              setSelectedStudentsToAdd(prev => [...prev, student.id]);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={selectedStudentsToAdd.includes(student.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedStudentsToAdd(prev => [...prev, student.id]);
+                                } else {
+                                  setSelectedStudentsToAdd(prev => prev.filter(id => id !== student.id));
+                                }
+                              }}
+                            />
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={student.profile?.avatar_url || undefined} />
+                              <AvatarFallback>
+                                {student.profile?.display_name?.charAt(0) || 'S'}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="font-medium">
+                              {student.profile?.display_name || 'Student'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    {students.filter(s => {
+                      const searchLower = studentSearchForManage.toLowerCase();
+                      const name = s.profile?.display_name?.toLowerCase() || '';
+                      return name.includes(searchLower) && !currentAssignedStudents.includes(s.id);
+                    }).length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        {studentSearchForManage ? 'No students found' : 'All students are already assigned'}
+                      </p>
+                    )}
+                  </div>
+                  {selectedStudentsToAdd.length > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {selectedStudentsToAdd.length} student(s) selected
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setManageStudentsOpen(false);
+                  setSelectedAssignmentForStudents(null);
+                  setSelectedStudentsToAdd([]);
+                  setCurrentAssignedStudents([]);
+                  setStudentSearchForManage('');
+                }}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleAddStudentsToAssignment}
+                  disabled={selectedStudentsToAdd.length === 0}
+                >
+                  Add {selectedStudentsToAdd.length > 0 ? `${selectedStudentsToAdd.length} ` : ''}Student{selectedStudentsToAdd.length !== 1 ? 's' : ''}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
     </Card>
   );
 }
