@@ -11,11 +11,18 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Building2, Copy, Users, UserCheck, UserX, 
   Loader2, Shield, GraduationCap, BookOpen, Clock, Paintbrush, FolderOpen,
-  Award, FileText, TrendingUp, Star, Eye, Search
+  Award, FileText, TrendingUp, Star, Eye, Search, Plus
 } from 'lucide-react';
 import { format } from 'date-fns';
 import {
@@ -60,6 +67,7 @@ export default function InstitutionAdmin() {
   const [allEssays, setAllEssays] = useState<any[]>([]);
   const [loadingEssays, setLoadingEssays] = useState(false);
   const [essaysSearchTerm, setEssaysSearchTerm] = useState('');
+  const [essaysStudentFilter, setEssaysStudentFilter] = useState<string>('all');
   
   // All Assignments state
   const [allAssignments, setAllAssignments] = useState<any[]>([]);
@@ -67,6 +75,11 @@ export default function InstitutionAdmin() {
   const [assignmentsSearchTerm, setAssignmentsSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [viewSubmissionsOpen, setViewSubmissionsOpen] = useState(false);
+  const [selectedAssignmentForSubmissions, setSelectedAssignmentForSubmissions] = useState<string | null>(null);
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState<any[]>([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [createAssignmentOpen, setCreateAssignmentOpen] = useState(false);
 
   // Auto-refresh data every 30 seconds
   useEffect(() => {
@@ -365,6 +378,7 @@ export default function InstitutionAdmin() {
         .eq("institution_id", activeInstitution.id);
 
       const memberIds = membersData?.map(m => m.id) || [];
+      const userIds = membersData?.map(m => m.user_id) || [];
 
       if (memberIds.length === 0) {
         setAllEssays([]);
@@ -372,49 +386,71 @@ export default function InstitutionAdmin() {
         return;
       }
 
-      // Get all submissions for these members
-      const { data: submissionsData } = await supabase
-        .from("assignment_submissions")
-        .select("id, essay_id, member_id, submitted_at, status")
-        .in("member_id", memberIds);
+      // Fetch ALL essays from the institution (both via institution_id and institution_member_id)
+      // This includes essays that may not be linked to assignment_submissions
+      // Fetch essays by institution_id
+      const { data: essaysByInstitution } = await supabase
+        .from("essays")
+        .select("id, essay_text, exam_type, topic, word_count, created_at, ai_score, teacher_score, institution_id, institution_member_id, user_id")
+        .eq("institution_id", activeInstitution.id)
+        .order("created_at", { ascending: false });
 
-      const essayIds = [...new Set(submissionsData?.map(s => s.essay_id).filter(Boolean) || [])];
+      // Fetch essays by institution_member_id
+      const { data: essaysByMember } = memberIds.length > 0 ? await supabase
+        .from("essays")
+        .select("id, essay_text, exam_type, topic, word_count, created_at, ai_score, teacher_score, institution_id, institution_member_id, user_id")
+        .in("institution_member_id", memberIds)
+        .order("created_at", { ascending: false }) : { data: null };
 
-      if (essayIds.length === 0) {
+      // Combine and deduplicate essays
+      const allEssaysMap = new Map();
+      (essaysByInstitution || []).forEach(essay => {
+        allEssaysMap.set(essay.id, essay);
+      });
+      (essaysByMember || []).forEach(essay => {
+        allEssaysMap.set(essay.id, essay);
+      });
+
+      const essaysData = Array.from(allEssaysMap.values())
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      if (essaysData.length === 0) {
         setAllEssays([]);
         setLoadingEssays(false);
         return;
       }
 
-      // Fetch essays
-      const { data: essaysData } = await supabase
-        .from("essays")
-        .select("id, essay_text, exam_type, topic, word_count, created_at")
-        .in("id", essayIds)
-        .order("created_at", { ascending: false });
+      // Get all submissions for these members (for linking)
+      const { data: submissionsData } = await supabase
+        .from("assignment_submissions")
+        .select("id, essay_id, member_id, submitted_at, status")
+        .in("member_id", memberIds);
 
       // Fetch members and profiles
-      const submissionMemberIds = [...new Set(submissionsData?.map(s => s.member_id) || [])];
+      const essayUserIds = [...new Set(essaysData.map(e => e.user_id).filter(Boolean))];
       const { data: membersWithProfiles } = await supabase
         .from("institution_members")
         .select("id, user_id")
-        .in("id", submissionMemberIds);
+        .in("user_id", essayUserIds)
+        .eq("institution_id", activeInstitution.id);
 
-      const userIds = membersWithProfiles?.map(m => m.user_id) || [];
+      const profileUserIds = membersWithProfiles?.map(m => m.user_id) || [];
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("user_id, display_name, avatar_url")
-        .in("user_id", userIds);
+        .in("user_id", profileUserIds);
 
       // Create maps
       const submissionMap = new Map(submissionsData?.map(s => [s.essay_id, s]) || []);
-      const memberMap = new Map(membersWithProfiles?.map(m => [m.id, m]) || []);
+      const memberMap = new Map(membersWithProfiles?.map(m => [m.user_id, m]) || []);
       const profileMap = new Map(profilesData?.map(p => [p.user_id, p]) || []);
 
       // Combine data
       const enrichedEssays = (essaysData || []).map(essay => {
         const submission = submissionMap.get(essay.id);
-        const member = submission ? memberMap.get(submission.member_id) : null;
+        // Try to find member by user_id first, then by institution_member_id
+        const member = memberMap.get(essay.user_id) || 
+                      (essay.institution_member_id ? membersWithProfiles?.find(m => m.id === essay.institution_member_id) : null);
         const profile = member ? profileMap.get(member.user_id) : null;
 
         return {
@@ -441,6 +477,7 @@ export default function InstitutionAdmin() {
 
     setLoadingAssignments(true);
     try {
+      // Fetch regular assignments
       const { data: assignmentsData, error } = await supabase
         .from("assignments")
         .select("id, title, topic, instructions, exam_type, due_date, created_at, is_active")
@@ -449,17 +486,43 @@ export default function InstitutionAdmin() {
 
       if (error) throw error;
 
-      // Fetch submission stats
-      const assignmentIds = assignmentsData?.map(a => a.id) || [];
-      if (assignmentIds.length > 0) {
+      // Fetch grammar assignments
+      const { data: grammarAssignments, error: grammarError } = await supabase
+        .from("grammar_manual_assignments")
+        .select("id, title, due_date, created_at")
+        .eq("institute_id", activeInstitution.id)
+        .order("created_at", { ascending: false });
+
+      if (grammarError) {
+        console.error('Error fetching grammar assignments:', grammarError);
+      }
+
+      // Convert grammar assignments to match regular assignment format
+      const convertedGrammarAssignments = (grammarAssignments || []).map(ga => ({
+        id: ga.id,
+        title: ga.title,
+        topic: 'Grammar Exercise',
+        instructions: null,
+        exam_type: 'GRAMMAR',
+        due_date: ga.due_date,
+        created_at: ga.created_at,
+        is_active: true,
+        isGrammar: true
+      }));
+
+      // Combine assignments
+      const allAssignmentsCombined = [...(assignmentsData || []), ...convertedGrammarAssignments];
+
+      // Fetch submission stats for regular assignments
+      const regularAssignmentIds = (assignmentsData || []).map(a => a.id);
+      const statsMap = new Map<string, { total: number; submitted: number; reviewed: number }>();
+      
+      if (regularAssignmentIds.length > 0) {
         const { data: submissionsData } = await supabase
           .from("assignment_submissions")
           .select("assignment_id, status")
-          .in("assignment_id", assignmentIds);
+          .in("assignment_id", regularAssignmentIds);
 
-        // Calculate stats for each assignment
-        const statsMap = new Map<string, { total: number; submitted: number; reviewed: number }>();
-        
         submissionsData?.forEach(s => {
           const current = statsMap.get(s.assignment_id) || { total: 0, submitted: 0, reviewed: 0 };
           current.total += 1;
@@ -471,21 +534,140 @@ export default function InstitutionAdmin() {
           }
           statsMap.set(s.assignment_id, current);
         });
-
-        const enrichedAssignments = (assignmentsData || []).map(assignment => ({
-          ...assignment,
-          submissionStats: statsMap.get(assignment.id) || { total: 0, submitted: 0, reviewed: 0 }
-        }));
-
-        setAllAssignments(enrichedAssignments);
-      } else {
-        setAllAssignments([]);
       }
+
+      // Fetch submission stats for grammar assignments
+      const grammarAssignmentIds = (grammarAssignments || []).map(ga => ga.id);
+      if (grammarAssignmentIds.length > 0) {
+        const { data: grammarAttempts } = await supabase
+          .from("grammar_attempts")
+          .select("assignment_id, student_id")
+          .eq("assignment_type", "manual")
+          .in("assignment_id", grammarAssignmentIds);
+
+        const uniqueSubmissions = new Map<string, Set<string>>();
+        grammarAttempts?.forEach(attempt => {
+          if (attempt.assignment_id) {
+            if (!uniqueSubmissions.has(attempt.assignment_id)) {
+              uniqueSubmissions.set(attempt.assignment_id, new Set());
+            }
+            uniqueSubmissions.get(attempt.assignment_id)!.add(attempt.student_id);
+          }
+        });
+
+        uniqueSubmissions.forEach((students, assignmentId) => {
+          statsMap.set(assignmentId, { total: students.size, submitted: students.size, reviewed: 0 });
+        });
+      }
+
+      const enrichedAssignments = allAssignmentsCombined.map(assignment => ({
+        ...assignment,
+        submissionStats: statsMap.get(assignment.id) || { total: 0, submitted: 0, reviewed: 0 }
+      }));
+
+      setAllAssignments(enrichedAssignments);
     } catch (err: any) {
       console.error('Error fetching all assignments:', err);
       toast({ title: 'Error', description: 'Failed to load assignments', variant: 'destructive' });
     } finally {
       setLoadingAssignments(false);
+    }
+  };
+
+  const handleViewSubmissions = async (assignmentId: string, isGrammar: boolean = false) => {
+    setSelectedAssignmentForSubmissions(assignmentId);
+    setViewSubmissionsOpen(true);
+    setLoadingSubmissions(true);
+    
+    try {
+      if (isGrammar) {
+        // Handle grammar assignment submissions
+        const { data: attemptsData } = await supabase
+          .from("grammar_attempts")
+          .select("student_id, assignment_id")
+          .eq("assignment_type", "manual")
+          .eq("assignment_id", assignmentId);
+
+        const uniqueStudents = new Set(attemptsData?.map(a => a.student_id) || []);
+        
+        // Fetch student details
+        const { data: membersData } = await supabase
+          .from("institution_members")
+          .select("id, user_id")
+          .eq("institution_id", activeInstitution!.id)
+          .in("user_id", Array.from(uniqueStudents));
+
+        const userIds = membersData?.map(m => m.user_id) || [];
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("user_id, display_name")
+          .in("user_id", userIds);
+
+        const profileMap = new Map(profilesData?.map(p => [p.user_id, p]) || []);
+        const memberMap = new Map(membersData?.map(m => [m.user_id, m]) || []);
+
+        const submissions = Array.from(uniqueStudents).map(userId => {
+          const member = memberMap.get(userId);
+          const profile = profileMap.get(userId);
+          return {
+            id: userId,
+            student_id: userId,
+            member: member ? { ...member, profile } : null,
+            status: 'submitted',
+            submitted_at: new Date().toISOString()
+          };
+        });
+
+        setAssignmentSubmissions(submissions);
+      } else {
+        // Handle regular assignment submissions
+        const { data: submissionsData, error } = await supabase
+          .from("assignment_submissions")
+          .select("id, member_id, status, submitted_at, essay_id, teacher_score, teacher_feedback")
+          .eq("assignment_id", assignmentId)
+          .order("submitted_at", { ascending: false });
+
+        if (error) throw error;
+
+        if (!submissionsData || submissionsData.length === 0) {
+          setAssignmentSubmissions([]);
+          setLoadingSubmissions(false);
+          return;
+        }
+
+        // Fetch member and profile data
+        const memberIds = [...new Set(submissionsData.map(s => s.member_id))];
+        const { data: membersData } = await supabase
+          .from("institution_members")
+          .select("id, user_id")
+          .in("id", memberIds);
+
+        const userIds = membersData?.map(m => m.user_id) || [];
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, avatar_url")
+          .in("user_id", userIds);
+
+        const memberMap = new Map(membersData?.map(m => [m.id, m]) || []);
+        const profileMap = new Map(profilesData?.map(p => [p.user_id, p]) || []);
+
+        const enrichedSubmissions = submissionsData.map(submission => {
+          const member = memberMap.get(submission.member_id);
+          const profile = member ? profileMap.get(member.user_id) : null;
+          return {
+            ...submission,
+            member: member ? { ...member, profile } : null
+          };
+        });
+
+        setAssignmentSubmissions(enrichedSubmissions);
+      }
+    } catch (err: any) {
+      console.error('Error fetching submissions:', err);
+      toast({ title: 'Error', description: 'Failed to load submissions', variant: 'destructive' });
+      setAssignmentSubmissions([]);
+    } finally {
+      setLoadingSubmissions(false);
     }
   };
 
@@ -508,8 +690,17 @@ export default function InstitutionAdmin() {
     return studentName.includes(search) || assignmentTitle.includes(search);
   });
 
-  // Filter all essays based on search term
+  // Filter all essays based on search term and student filter
   const filteredEssays = allEssays.filter(essay => {
+    // Filter by student
+    if (essaysStudentFilter !== 'all') {
+      const member = essay.member;
+      if (!member || member.user_id !== essaysStudentFilter) {
+        return false;
+      }
+    }
+    
+    // Filter by search term
     if (!essaysSearchTerm) return true;
     const search = essaysSearchTerm.toLowerCase();
     const studentName = essay.member?.profile?.display_name?.toLowerCase() || '';
@@ -1060,12 +1251,29 @@ export default function InstitutionAdmin() {
                   All Essays
                 </CardTitle>
                 <CardDescription>Essays written by all students in your institution</CardDescription>
-                <Input
-                  placeholder="Search by student or topic..."
-                  value={essaysSearchTerm}
-                  onChange={(e) => setEssaysSearchTerm(e.target.value)}
-                  className="max-w-sm mt-2"
-                />
+                <div className="flex gap-2 mt-2">
+                  <Input
+                    placeholder="Search by student or topic..."
+                    value={essaysSearchTerm}
+                    onChange={(e) => setEssaysSearchTerm(e.target.value)}
+                    className="max-w-sm"
+                  />
+                  <Select value={essaysStudentFilter} onValueChange={setEssaysStudentFilter}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Filter by student" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Students</SelectItem>
+                      {members
+                        .filter(m => m.role === 'student' && m.status === 'active')
+                        .map(member => (
+                          <SelectItem key={member.user_id} value={member.user_id}>
+                            {member.profile?.display_name || 'Unknown Student'}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 {loadingEssays ? (
@@ -1086,6 +1294,7 @@ export default function InstitutionAdmin() {
                         <TableHead>Words</TableHead>
                         <TableHead>Score</TableHead>
                         <TableHead>Created</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1095,7 +1304,7 @@ export default function InstitutionAdmin() {
                           <TableRow key={essay.id}>
                             <TableCell>
                               <div className="font-medium">
-                                {essay.profile?.display_name || 'Unknown Student'}
+                                {essay.member?.profile?.display_name || 'Unknown Student'}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -1118,6 +1327,26 @@ export default function InstitutionAdmin() {
                                 <span className="text-muted-foreground text-sm">-</span>
                               )}
                             </TableCell>
+                            <TableCell>
+                              {essay.id && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    // Find the submission to get essay_id
+                                    const submission = essay.submission;
+                                    if (submission?.essay_id) {
+                                      navigate(`/institution/view-reviewed-essay/${submission.essay_id}`);
+                                    } else {
+                                      navigate(`/essay-review/${essay.id}`);
+                                    }
+                                  }}
+                                >
+                                  <Eye className="h-4 w-4 mr-1" />
+                                  View
+                                </Button>
+                              )}
+                            </TableCell>
                             <TableCell className="text-muted-foreground text-sm">
                               {format(new Date(essay.created_at), 'MMM d, yyyy')}
                             </TableCell>
@@ -1134,11 +1363,19 @@ export default function InstitutionAdmin() {
           <TabsContent value="assignments">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BookOpen className="h-5 w-5" />
-                  All Assignments
-                </CardTitle>
-                <CardDescription>All assignments created for your institution</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <BookOpen className="h-5 w-5" />
+                      All Assignments
+                    </CardTitle>
+                    <CardDescription>All assignments created for your institution</CardDescription>
+                  </div>
+                  <Button onClick={() => setCreateAssignmentOpen(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Assignment
+                  </Button>
+                </div>
                 <Input
                   placeholder="Search assignments..."
                   value={assignmentsSearchTerm}
@@ -1165,6 +1402,7 @@ export default function InstitutionAdmin() {
                         <TableHead>Submissions</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Created</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1203,6 +1441,16 @@ export default function InstitutionAdmin() {
                           <TableCell className="text-muted-foreground text-sm">
                             {format(new Date(assignment.created_at), 'MMM d, yyyy')}
                           </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewSubmissions(assignment.id, assignment.isGrammar || false)}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View Submissions
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1223,6 +1471,109 @@ export default function InstitutionAdmin() {
             />
           </TabsContent>
         </Tabs>
+
+        {/* View Submissions Dialog */}
+        <Dialog open={viewSubmissionsOpen} onOpenChange={setViewSubmissionsOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Assignment Submissions</DialogTitle>
+              <DialogDescription>
+                View all submissions for this assignment
+              </DialogDescription>
+            </DialogHeader>
+            {loadingSubmissions ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </div>
+            ) : assignmentSubmissions.length === 0 ? (
+              <p className="text-center py-8 text-muted-foreground">
+                No submissions yet
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Student</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Submitted</TableHead>
+                    <TableHead>Score</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {assignmentSubmissions.map((submission) => (
+                    <TableRow key={submission.id}>
+                      <TableCell>
+                        <div className="font-medium">
+                          {submission.member?.profile?.display_name || 'Unknown Student'}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          submission.status === 'reviewed' ? 'default' :
+                          submission.status === 'submitted' ? 'secondary' :
+                          'outline'
+                        }>
+                          {submission.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {submission.submitted_at 
+                          ? format(new Date(submission.submitted_at), 'MMM d, yyyy h:mm a')
+                          : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {submission.teacher_score !== null ? (
+                          <div className="flex items-center gap-1">
+                            <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                            <span className="font-semibold">{submission.teacher_score}</span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {submission.essay_id && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate(`/institution/view-reviewed-essay/${submission.essay_id}`)}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Essay
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Create Assignment Dialog */}
+        <Dialog open={createAssignmentOpen} onOpenChange={setCreateAssignmentOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Create Assignment</DialogTitle>
+              <DialogDescription>
+                Create a new assignment for your institution
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <p className="text-sm text-muted-foreground mb-4">
+                To create assignments, please navigate to the Teacher Dashboard and use the Assignments section there.
+              </p>
+              <Button onClick={() => {
+                setCreateAssignmentOpen(false);
+                navigate('/teacher');
+              }}>
+                Go to Teacher Dashboard
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <p className="text-center text-sm text-muted-foreground mt-8">
           ScoreWise for Institutes — Powered by Mithil & Hasti

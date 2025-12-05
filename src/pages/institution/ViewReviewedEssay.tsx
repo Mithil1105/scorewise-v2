@@ -282,10 +282,11 @@ export default function ViewReviewedEssay() {
   if (showCorrections && hasCorrections) {
     displayContent = renderEssayWithCorrections(originalText, corrections);
   } else {
-    // Plain text, no highlights - escape HTML
+    // Plain text, no highlights - escape HTML and preserve paragraphs
     const div = document.createElement('div');
     div.textContent = originalText;
-    displayContent = div.innerHTML;
+    // Convert newlines to <br> tags to preserve paragraph breaks
+    displayContent = div.innerHTML.replace(/\n/g, '<br>');
   }
 
   const getMaxScore = (examType: string): number => {
@@ -488,7 +489,10 @@ export default function ViewReviewedEssay() {
                 )}
 
                 <div className="min-h-[400px] p-4 border rounded-lg bg-white dark:bg-gray-900 prose prose-sm max-w-none dark:prose-invert">
-                  <div dangerouslySetInnerHTML={{ __html: displayContent }} />
+                  <div 
+                    className="whitespace-pre-wrap text-sm leading-relaxed"
+                    dangerouslySetInnerHTML={{ __html: displayContent }} 
+                  />
                 </div>
               </CardContent>
             </Card>
