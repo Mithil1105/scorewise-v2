@@ -130,11 +130,24 @@ export default function InstitutionAdmin() {
     }
 
     // If we have valid access, fetch members
-    if (activeMembership && activeMembership.role === 'inst_admin' && activeMembership.status === 'active') {
+    // Use activeInstitution or fallback to activeMembership.institution
+    const institution = activeInstitution || activeMembership?.institution;
+    
+    if (activeMembership && activeMembership.role === 'inst_admin' && activeMembership.status === 'active' && institution) {
+      console.log('InstitutionAdmin: Fetching data for institution:', institution.id, institution.name);
       fetchMembers();
       fetchRecentGrades();
       fetchAllEssays();
       fetchAllAssignments();
+    } else {
+      console.log('InstitutionAdmin: Not fetching data -', {
+        hasMembership: !!activeMembership,
+        role: activeMembership?.role,
+        status: activeMembership?.status,
+        hasInstitution: !!institution,
+        institutionId: institution?.id,
+        hasMembershipInstitution: !!activeMembership?.institution
+      });
     }
   }, [user, activeMembership, authLoading, institutionLoading, navigate, activeInstitution]);
 
@@ -154,14 +167,19 @@ export default function InstitutionAdmin() {
   }, [activeTab, activeInstitution, activeMembership]);
 
   const fetchMembers = async () => {
-    if (!activeInstitution) return;
+    const institution = activeInstitution || activeMembership?.institution;
+    if (!institution) {
+      console.error('Cannot fetch members: institution is null');
+      setLoading(false);
+      return;
+    }
     
     setLoading(true);
     try {
       const { data: membersData, error } = await supabase
         .from('institution_members')
         .select('*')
-        .eq('institution_id', activeInstitution.id);
+        .eq('institution_id', institution.id);
 
       if (error) throw error;
 
@@ -209,17 +227,23 @@ export default function InstitutionAdmin() {
       })) as Member[];
 
       setMembers(enrichedMembers);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching members:', err);
+      toast({ 
+        title: 'Error', 
+        description: err.message || 'Failed to load members', 
+        variant: 'destructive' 
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const copyCode = () => {
-    if (activeInstitution?.code) {
-      navigator.clipboard.writeText(activeInstitution.code);
-      toast({ title: 'Code copied!', description: activeInstitution.code });
+    const institution = activeInstitution || activeMembership?.institution;
+    if (institution?.code) {
+      navigator.clipboard.writeText(institution.code);
+      toast({ title: 'Code copied!', description: institution.code });
     }
   };
 
@@ -267,15 +291,19 @@ export default function InstitutionAdmin() {
   };
 
   const fetchRecentGrades = async () => {
-    if (!activeInstitution) return;
-
+    if (!activeInstitution) {
+      console.error('Cannot fetch grades: activeInstitution is null');
+      setLoadingGrades(false);
+      return;
+    }
+    
     setLoadingGrades(true);
     try {
       // First, get assignment IDs for this institution
       const { data: institutionAssignments } = await supabase
         .from("assignments")
         .select("id")
-        .eq("institution_id", activeInstitution.id);
+        .eq("institution_id", institution.id);
 
       const assignmentIds = institutionAssignments?.map(a => a.id) || [];
 
@@ -360,14 +388,23 @@ export default function InstitutionAdmin() {
       setRecentGrades(enrichedSubmissions);
     } catch (err: any) {
       console.error('Error fetching recent grades:', err);
-      toast({ title: 'Error', description: 'Failed to load recent grades', variant: 'destructive' });
+      toast({ 
+        title: 'Error', 
+        description: err.message || 'Failed to load recent grades', 
+        variant: 'destructive' 
+      });
     } finally {
       setLoadingGrades(false);
     }
   };
 
   const fetchAllEssays = async () => {
-    if (!activeInstitution) return;
+    const institution = activeInstitution || activeMembership?.institution;
+    if (!institution) {
+      console.error('Cannot fetch essays: institution is null');
+      setLoadingEssays(false);
+      return;
+    }
 
     setLoadingEssays(true);
     try {
@@ -375,7 +412,7 @@ export default function InstitutionAdmin() {
       const { data: membersData } = await supabase
         .from("institution_members")
         .select("id, user_id")
-        .eq("institution_id", activeInstitution.id);
+        .eq("institution_id", institution.id);
 
       const memberIds = membersData?.map(m => m.id) || [];
       const userIds = membersData?.map(m => m.user_id) || [];
@@ -392,7 +429,7 @@ export default function InstitutionAdmin() {
       const { data: essaysByInstitution } = await supabase
         .from("essays")
         .select("id, essay_text, exam_type, topic, word_count, created_at, ai_score, teacher_score, institution_id, institution_member_id, user_id")
-        .eq("institution_id", activeInstitution.id)
+        .eq("institution_id", institution.id)
         .order("created_at", { ascending: false });
 
       // Fetch essays by institution_member_id
@@ -432,7 +469,7 @@ export default function InstitutionAdmin() {
         .from("institution_members")
         .select("id, user_id")
         .in("user_id", essayUserIds)
-        .eq("institution_id", activeInstitution.id);
+        .eq("institution_id", institution.id);
 
       const profileUserIds = membersWithProfiles?.map(m => m.user_id) || [];
       const { data: profilesData } = await supabase
@@ -466,14 +503,23 @@ export default function InstitutionAdmin() {
       setAllEssays(enrichedEssays);
     } catch (err: any) {
       console.error('Error fetching all essays:', err);
-      toast({ title: 'Error', description: 'Failed to load essays', variant: 'destructive' });
+      toast({ 
+        title: 'Error', 
+        description: err.message || 'Failed to load essays', 
+        variant: 'destructive' 
+      });
     } finally {
       setLoadingEssays(false);
     }
   };
 
   const fetchAllAssignments = async () => {
-    if (!activeInstitution) return;
+    const institution = activeInstitution || activeMembership?.institution;
+    if (!institution) {
+      console.error('Cannot fetch assignments: institution is null');
+      setLoadingAssignments(false);
+      return;
+    }
 
     setLoadingAssignments(true);
     try {
@@ -481,7 +527,7 @@ export default function InstitutionAdmin() {
       const { data: assignmentsData, error } = await supabase
         .from("assignments")
         .select("id, title, topic, instructions, exam_type, due_date, created_at, is_active")
-        .eq("institution_id", activeInstitution.id)
+        .eq("institution_id", institution.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -490,7 +536,7 @@ export default function InstitutionAdmin() {
       const { data: grammarAssignments, error: grammarError } = await supabase
         .from("grammar_manual_assignments")
         .select("id, title, due_date, created_at")
-        .eq("institute_id", activeInstitution.id)
+        .eq("institute_id", institution.id)
         .order("created_at", { ascending: false });
 
       if (grammarError) {
@@ -743,8 +789,11 @@ export default function InstitutionAdmin() {
     );
   }
 
+  // Use activeInstitution or fallback to activeMembership.institution
+  const institution = activeInstitution || activeMembership?.institution;
+
   // Don't render anything if we're redirecting (prevents flash of content)
-  if (!user || !activeInstitution || !activeMembership || activeMembership.role !== 'inst_admin' || activeMembership.status !== 'active') {
+  if (!user || !institution || !activeMembership || activeMembership.role !== 'inst_admin' || activeMembership.status !== 'active') {
     return (
       <PageLayout>
         <TopBar />
@@ -767,7 +816,7 @@ export default function InstitutionAdmin() {
         <div className="flex items-center gap-3 mb-8">
           <Building2 className="h-8 w-8 text-primary" />
           <div>
-            <h1 className="text-3xl font-bold">{activeInstitution.name}</h1>
+            <h1 className="text-3xl font-bold">{institution.name}</h1>
             <p className="text-muted-foreground">Institution Admin Panel</p>
           </div>
         </div>
@@ -780,7 +829,7 @@ export default function InstitutionAdmin() {
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
-                <code className="text-lg font-mono font-bold">{activeInstitution.code}</code>
+                <code className="text-lg font-mono font-bold">{institution.code}</code>
                 <Button variant="ghost" size="icon" onClick={copyCode}>
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -841,7 +890,7 @@ export default function InstitutionAdmin() {
             </CardHeader>
             <CardContent>
               <Badge variant="secondary" className="capitalize">
-                {activeInstitution.plan}
+                {institution.plan}
               </Badge>
             </CardContent>
           </Card>
